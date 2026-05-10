@@ -1,0 +1,13 @@
+.env
+*.pyc
+__pycache__/
+.pytest_cache/
+data/raw/
+data/*.pkl
+*.db
+*.json
+!*example*.json
+.DS_Store
+.gcp/
+*service-account*.json
+*credentials*.json
