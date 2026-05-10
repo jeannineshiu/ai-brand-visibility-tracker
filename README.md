@@ -8,19 +8,48 @@ Inspired by tools like [Peec AI](https://peec.ai) — built with real APIs inste
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Pipeline Flow                            │
-│                                                                 │
-│  Prompts → [Module 1] → Raw JSON → [Module 2] → Structured     │
-│                                                    Data         │
-│                                                      │          │
-│                                               [Module 3]        │
-│                                          BigQuery + Dashboard   │
-│                                                      │          │
-│                                               [Module 4]        │
-│                                         LightGBM + FastAPI      │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A([Prompt Configs\n40 prompts × 4 categories]) --> B
+
+    subgraph M1["Module 1 — Prompt Runner"]
+        B[asyncio.gather]
+        B --> C1[OpenAI\ngpt-4o-mini]
+        B --> C2[Anthropic\nclaude-haiku-4-5]
+        B --> C3[Gemini\n2.5-flash]
+        B --> C4[MockClient\nauto-fallback]
+    end
+
+    C1 & C2 & C3 & C4 --> D[(Raw JSON\ndata/raw/)]
+
+    subgraph M2["Module 2 — Brand & Source Analyzer"]
+        D --> E1[Brand Detector\nspaCy NER + regex]
+        D --> E2[Sentiment Judge\nLLM-as-judge gpt-4o-mini]
+        D --> E3[Citation Extractor\nURL regex + domain classifier]
+    end
+
+    E1 & E2 & E3 --> F
+
+    subgraph M3["Module 3 — Visibility Metrics"]
+        F[store.py\nSQLite / BigQuery]
+        F --> G1[(BigQuery\nbrand_mentions\ncitation_sources)]
+        G1 --> G2[calculator.py\nvisibility % · position trend\nsentiment moving avg]
+        G2 --> G3[Plotly Dash\nDashboard :8050]
+    end
+
+    G1 --> H
+
+    subgraph M4["Module 4 — Recommendation Engine"]
+        H[feature_engineer.py\nco-occurrence features]
+        H --> I1[LightGBM\nR²=0.80]
+        H --> I2[Rule-based scorer\nfallback]
+        I1 & I2 --> J[FastAPI :8001\n/recommendations\n/retrain\n/visibility]
+    end
+
+    style M1 fill:#dbeafe,stroke:#3b82f6
+    style M2 fill:#dcfce7,stroke:#22c55e
+    style M3 fill:#fef9c3,stroke:#eab308
+    style M4 fill:#fce7f3,stroke:#ec4899
 ```
 
 ### Module 1 — Prompt Runner
