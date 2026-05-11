@@ -23,7 +23,7 @@ flowchart TD
     C1 & C2 & C3 & C4 --> D[(Raw JSON\ndata/raw/)]
 
     subgraph M2["Module 2 — Brand & Source Analyzer"]
-        D --> E1[Brand Detector\nspaCy NER + regex]
+        D --> E1[Brand Detector\nregex + spaCy NER]
         D --> E2[Sentiment Judge\nLLM-as-judge gpt-4o-mini]
         D --> E3[Citation Extractor\nURL regex + domain classifier]
     end
@@ -43,7 +43,7 @@ flowchart TD
         H[feature_engineer.py\nco-occurrence features]
         H --> I1[LightGBM\nR²=0.80]
         H --> I2[Rule-based scorer\nfallback]
-        I1 & I2 --> J[FastAPI :8001\n/recommendations\n/retrain\n/visibility]
+        I1 & I2 --> J[FastAPI :8000\n/recommendations\n/retrain\n/visibility]
     end
 
     style M1 fill:#dbeafe,stroke:#3b82f6
@@ -205,7 +205,7 @@ python demo_module4.py
 # Dry run — preview 40 prompts without API calls
 python run_batch_pipeline.py --dry-run
 
-# Run all 40 prompts × 3 LLMs (~$0.08, ~30 min)
+# Run all 40 prompts × 3 LLMs (~$0.08, ~5-10 min)
 python run_batch_pipeline.py
 
 # Run one category only (cheaper test)
@@ -224,21 +224,21 @@ Once `demo_module4.py` is running:
 
 ```bash
 # Get recommendations (uses LightGBM if model exists)
-curl -X POST http://localhost:8001/recommendations \
+curl -X POST http://localhost:8000/recommendations \
   -H "Content-Type: application/json" \
   -d '{"target_brand": "Asana", "competitors": ["Jira", "Linear", "Monday.com"], "top_n": 5}'
 
 # Visibility summary
-curl "http://localhost:8001/visibility?brands=Asana,Jira,Monday.com"
+curl "http://localhost:8000/visibility?brands=Asana,Jira,Monday.com"
 
 # Competitor gap analysis
-curl http://localhost:8001/competitor-gap/Asana
+curl http://localhost:8000/competitor-gap/Asana
 
 # Retrain model on latest data (no server restart needed)
-curl -X POST http://localhost:8001/retrain
+curl -X POST http://localhost:8000/retrain
 ```
 
-Interactive API docs: `http://localhost:8001/docs`
+Interactive API docs: `http://localhost:8000/docs`
 
 ---
 
