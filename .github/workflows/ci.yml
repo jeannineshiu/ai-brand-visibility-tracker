@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main, jeannine]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('environment.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install \
+            "openai>=1.30.0" \
+            "anthropic>=0.28.0" \
+            "google-genai>=1.0.0" \
+            "spacy>=3.7.0" \
+            "pandas>=2.2.0" \
+            "google-cloud-bigquery>=3.20.0" \
+            "db-dtypes>=1.2.0" \
+            "lightgbm>=4.3.0" \
+            "scikit-learn>=1.4.0" \
+            "fastapi>=0.111.0" \
+            "uvicorn>=0.29.0" \
+            "plotly>=5.22.0" \
+            "dash>=2.17.0" \
+            "python-dotenv>=1.0.0" \
+            "pydantic>=2.7.0" \
+            "httpx>=0.27.0" \
+            "tenacity>=8.3.0" \
+            "rich>=13.7.0" \
+            "pytest>=8.2.0" \
+            "pytest-asyncio>=0.23.0"
+
+      - name: Download spaCy model
+        run: python -m spacy download en_core_web_sm
+
+      - name: Run tests
+        run: pytest -v
