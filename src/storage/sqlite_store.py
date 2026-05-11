@@ -1,8 +1,10 @@
 """SQLite storage backend — used for local development."""
+import json
 import sqlite3
 from pathlib import Path
+from datetime import datetime
 from src.utils.config import DATA_DIR
-from src.utils.models import LLMResponse, BrandMention, CitationSource
+from src.utils.models import LLMResponse, BrandMention, CitationSource, PromptConfig
 from src.storage.schema import SQLITE_DDL
 
 DB_PATH = DATA_DIR / "tracker.db"
@@ -77,3 +79,52 @@ def query_df(sql: str, params=None):
     import pandas as pd
     with get_connection() as conn:
         return pd.read_sql_query(sql, conn, params=params)
+
+
+def save_prompt(p: PromptConfig) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO prompts
+               (prompt_id, prompt_text, category, target_brands, created_at)
+               VALUES (?,?,?,?,?)""",
+            (p.prompt_id, p.prompt_text, p.category,
+             json.dumps(p.target_brands), datetime.utcnow().isoformat()),
+        )
+
+
+def list_prompts() -> list[PromptConfig]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT prompt_id, prompt_text, category, target_brands FROM prompts ORDER BY created_at"
+        ).fetchall()
+    return [
+        PromptConfig(
+            prompt_id=r["prompt_id"],
+            prompt_text=r["prompt_text"],
+            category=r["category"],
+            target_brands=json.loads(r["target_brands"]),
+        )
+        for r in rows
+    ]
+
+
+def get_prompt(prompt_id: str) -> PromptConfig | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT prompt_id, prompt_text, category, target_brands FROM prompts WHERE prompt_id=?",
+            (prompt_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return PromptConfig(
+        prompt_id=row["prompt_id"],
+        prompt_text=row["prompt_text"],
+        category=row["category"],
+        target_brands=json.loads(row["target_brands"]),
+    )
+
+
+def delete_prompt(prompt_id: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute("DELETE FROM prompts WHERE prompt_id=?", (prompt_id,))
+    return cursor.rowcount > 0

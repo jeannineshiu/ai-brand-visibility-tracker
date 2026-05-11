@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from src.utils.config import GCP_PROJECT_ID, BIGQUERY_DATASET, GOOGLE_APPLICATION_CREDENTIALS
-from src.utils.models import LLMResponse, BrandMention, CitationSource
+from src.utils.models import LLMResponse, BrandMention, CitationSource, PromptConfig
 
 
 def _bigquery_ready() -> bool:
@@ -65,3 +65,28 @@ def query_df(sql: str, params=None):
     if _USE_BIGQUERY:
         return b.query_df(sql)
     return b.query_df(sql, params)
+
+
+def save_prompt(p: PromptConfig) -> None:
+    _backend().save_prompt(p)
+
+
+def list_prompts() -> list[PromptConfig]:
+    return _backend().list_prompts()
+
+
+def get_prompt(prompt_id: str) -> PromptConfig | None:
+    return _backend().get_prompt(prompt_id)
+
+
+def delete_prompt(prompt_id: str) -> bool:
+    return _backend().delete_prompt(prompt_id)
+
+
+def seed_prompts(prompts: list[PromptConfig]) -> int:
+    """Insert prompts that don't already exist. Returns count of new inserts."""
+    existing = {p.prompt_id for p in list_prompts()}
+    new = [p for p in prompts if p.prompt_id not in existing]
+    for p in new:
+        save_prompt(p)
+    return len(new)

@@ -37,6 +37,14 @@ CREATE TABLE IF NOT EXISTS citation_sources (
     created_at   TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS prompts (
+    prompt_id     TEXT PRIMARY KEY,
+    prompt_text   TEXT NOT NULL,
+    category      TEXT NOT NULL,
+    target_brands TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_brand_mentions_brand ON brand_mentions(brand);
 CREATE INDEX IF NOT EXISTS idx_brand_mentions_run ON brand_mentions(run_id);
 CREATE INDEX IF NOT EXISTS idx_brand_mentions_date ON brand_mentions(created_at);
@@ -71,6 +79,13 @@ BIGQUERY_SCHEMAS = {
         ("url", "STRING"),
         ("domain", "STRING"),
         ("domain_type", "STRING"),
+        ("created_at", "TIMESTAMP"),
+    ],
+    "prompts": [
+        ("prompt_id", "STRING"),
+        ("prompt_text", "STRING"),
+        ("category", "STRING"),
+        ("target_brands", "STRING"),
         ("created_at", "TIMESTAMP"),
     ],
 }

@@ -3,7 +3,7 @@ from rich.console import Console
 from rich.table import Table
 
 from src.utils.models import LLMResponse, BrandMention, CitationSource, PromptConfig
-from src.analyzer.brand_detector import detect_brands
+from src.analyzer.brand_detector import detect_brands, extract_entities
 from src.analyzer.sentiment_judge import judge_batch
 from src.analyzer.citation_extractor import extract_citations
 from src.analyzer.vote import VotedMention
@@ -14,16 +14,19 @@ console = Console()
 async def analyze_responses(
     responses: list[LLMResponse],
     prompt_configs: list[PromptConfig],
-) -> tuple[list[BrandMention], list[CitationSource]]:
+) -> tuple[list[BrandMention], list[CitationSource], list[str]]:
     """
     Full analysis pipeline for a list of LLM responses.
-    Returns (brand_mentions, citation_sources).
+    Returns (brand_mentions, citation_sources, discovered_competitors).
+    discovered_competitors: ORG entities found by spaCy not in any target brand list.
     """
     prompt_map = {p.prompt_id: p for p in prompt_configs}
+    all_known = {b.lower() for p in prompt_configs for b in p.target_brands}
     all_mentions: list[BrandMention] = []
     all_citations: list[CitationSource] = []
+    discovered: set[str] = set()
 
-    # --- Phase 1: Brand detection + Citation extraction (CPU, fast) ---
+    # --- Phase 1: Brand detection + Citation extraction + Entity discovery ---
     raw_mentions_per_response: list[tuple] = []
     for resp in responses:
         if resp.error or not resp.response_text:
@@ -37,7 +40,6 @@ async def analyze_responses(
         raw = detect_brands(resp.response_text, target_brands)
         raw_mentions_per_response.append((resp, raw))
 
-        # Citations — no async needed
         for cite in extract_citations(resp.response_text):
             all_citations.append(CitationSource(
                 run_id=resp.run_id,
@@ -48,9 +50,13 @@ async def analyze_responses(
                 domain_type=cite.domain_type,
             ))
 
+        for ent in extract_entities(resp.response_text):
+            if ent.lower() not in all_known:
+                discovered.add(ent)
+
     # --- Phase 2: Sentiment (async LLM-as-judge, batch all at once) ---
-    judge_inputs: list[tuple[str, str]] = []   # (brand, snippet)
-    judge_meta: list[tuple[LLMResponse, object]] = []   # parallel tracking
+    judge_inputs: list[tuple[str, str]] = []
+    judge_meta: list[tuple[LLMResponse, object]] = []
 
     for resp, raw_list in raw_mentions_per_response:
         if not raw_list:
@@ -72,14 +78,15 @@ async def analyze_responses(
             snippet=raw.snippet,
         ))
 
-    _print_analysis_summary(all_mentions, all_citations)
-    return all_mentions, all_citations
+    discovered_list = sorted(discovered)
+    _print_analysis_summary(all_mentions, all_citations, discovered_list)
+    return all_mentions, all_citations, discovered_list
 
 
 async def analyze_voted_responses(
     voted: list[tuple[LLMResponse, list[VotedMention]]],
     all_responses: list[LLMResponse],
-) -> tuple[list[BrandMention], list[CitationSource]]:
+) -> tuple[list[BrandMention], list[CitationSource], list[str]]:
     """
     Pipeline variant for majority-voted brand mentions.
 
@@ -88,8 +95,10 @@ async def analyze_voted_responses(
     """
     all_mentions: list[BrandMention] = []
     all_citations: list[CitationSource] = []
+    discovered: set[str] = set()
+    voted_brands = {vm.brand.lower() for _, vms in voted for vm in vms}
 
-    # Citations: extract from ALL trial responses and deduplicate by (prompt, provider, url)
+    # Citations + entity discovery from ALL trial responses
     seen_citations: set[tuple] = set()
     for resp in all_responses:
         if resp.error or not resp.response_text:
@@ -106,6 +115,9 @@ async def analyze_voted_responses(
                     domain=cite.domain,
                     domain_type=cite.domain_type,
                 ))
+        for ent in extract_entities(resp.response_text):
+            if ent.lower() not in voted_brands:
+                discovered.add(ent)
 
     # Sentiment judging on voted brands only
     judge_inputs: list[tuple[str, str]] = []
@@ -129,11 +141,16 @@ async def analyze_voted_responses(
             snippet=vm.snippet,
         ))
 
-    _print_analysis_summary(all_mentions, all_citations)
-    return all_mentions, all_citations
+    discovered_list = sorted(discovered)
+    _print_analysis_summary(all_mentions, all_citations, discovered_list)
+    return all_mentions, all_citations, discovered_list
 
 
-def _print_analysis_summary(mentions: list[BrandMention], citations: list[CitationSource]):
+def _print_analysis_summary(
+    mentions: list[BrandMention],
+    citations: list[CitationSource],
+    discovered: list[str] | None = None,
+):
     # Brand mentions table
     table = Table(title="Brand Mentions")
     table.add_column("Brand", style="bold")
@@ -160,3 +177,10 @@ def _print_analysis_summary(mentions: list[BrandMention], citations: list[Citati
     for c in citations:
         ctable.add_row(c.domain or c.url[:40], c.domain_type, c.provider.value)
     console.print(ctable)
+
+    if discovered:
+        dtable = Table(title="Discovered Competitors (not in target list)")
+        dtable.add_column("Entity", style="magenta")
+        for ent in discovered:
+            dtable.add_row(ent)
+        console.print(dtable)

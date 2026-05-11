@@ -12,6 +12,7 @@ from src.recommender.train_lgbm import (
     build_training_data, train, save_model, load_model, load_features_df, predict_opportunities
 )
 from src.metrics.calculator import visibility_summary, competitor_gap, citation_type_breakdown
+from src.storage import store
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ _lgbm_training_df = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _lgbm_model, _lgbm_features, _lgbm_encoder, _lgbm_training_df
+    store.init()
     _lgbm_model, _lgbm_features, _lgbm_encoder = load_model()
     if _lgbm_model is not None:
         _lgbm_training_df = load_features_df()
@@ -73,6 +75,20 @@ def _get_lgbm_df():
 
 # ── Request / Response models ──────────────────────────────────────────────────
 
+class PromptIn(BaseModel):
+    prompt_id: Optional[str] = None
+    prompt_text: str
+    category: str
+    target_brands: list[str]
+
+
+class PromptOut(BaseModel):
+    prompt_id: str
+    prompt_text: str
+    category: str
+    target_brands: list[str]
+
+
 class RecommendRequest(BaseModel):
     target_brand: str
     competitors: list[str]
@@ -98,6 +114,43 @@ class VisibilityOut(BaseModel):
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
+
+@app.get("/prompts", response_model=list[PromptOut])
+def list_prompts():
+    """List all prompts stored in the database."""
+    try:
+        return [p.model_dump() for p in store.list_prompts()]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/prompts", response_model=PromptOut, status_code=201)
+def create_prompt(body: PromptIn):
+    """
+    Add a new prompt to the database.
+    If prompt_id is omitted, one is auto-generated.
+    """
+    import uuid
+    from src.utils.models import PromptConfig
+    prompt_id = body.prompt_id or f"custom_{uuid.uuid4().hex[:8]}"
+    if store.get_prompt(prompt_id) is not None:
+        raise HTTPException(status_code=409, detail=f"prompt_id '{prompt_id}' already exists")
+    p = PromptConfig(
+        prompt_id=prompt_id,
+        prompt_text=body.prompt_text,
+        category=body.category,
+        target_brands=body.target_brands,
+    )
+    store.save_prompt(p)
+    return p.model_dump()
+
+
+@app.delete("/prompts/{prompt_id}", status_code=204)
+def delete_prompt(prompt_id: str):
+    """Delete a prompt by its ID."""
+    if not store.delete_prompt(prompt_id):
+        raise HTTPException(status_code=404, detail=f"prompt_id '{prompt_id}' not found")
+
 
 @app.get("/health")
 def health():

@@ -20,6 +20,15 @@ from src.analyzer.vote import majority_vote
 from src.analyzer.pipeline import analyze_responses, analyze_voted_responses
 from src.storage import store
 
+
+def _load_prompts():
+    """Load prompts from DB; seed from BATCH_PROMPTS if table is empty."""
+    store.init()
+    seeded = store.seed_prompts(BATCH_PROMPTS)
+    if seeded:
+        console.print(f"[dim]Seeded {seeded} prompts from BATCH_PROMPTS into DB.[/]")
+    return store.list_prompts()
+
 console = Console()
 
 BATCH_SIZE = 10      # prompts per batch (avoids rate limits)
@@ -82,9 +91,9 @@ async def run_pipeline(prompts, dry_run: bool = False, n_runs: int = 1):
             # 3. Analyze — use voting path when n_runs > 1
             if n_runs > 1:
                 voted = majority_vote(ok, batch, n_runs=n_runs)
-                mentions, citations = await analyze_voted_responses(voted, ok)
+                mentions, citations, _ = await analyze_voted_responses(voted, ok)
             else:
-                mentions, citations = await analyze_responses(ok, batch)
+                mentions, citations, _ = await analyze_responses(ok, batch)
             all_mentions.extend(mentions)
             all_citations.extend(citations)
 
@@ -125,9 +134,9 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
-    prompts = BATCH_PROMPTS
+    all_prompts = _load_prompts()
     if args.category:
-        prompts = [p for p in BATCH_PROMPTS if p.category == args.category]
-        console.print(f"[dim]Filtered to category: {args.category} ({len(prompts)} prompts)[/]")
+        all_prompts = [p for p in all_prompts if p.category == args.category]
+        console.print(f"[dim]Filtered to category: {args.category} ({len(all_prompts)} prompts)[/]")
 
-    asyncio.run(run_pipeline(prompts, dry_run=args.dry_run, n_runs=args.n_runs))
+    asyncio.run(run_pipeline(all_prompts, dry_run=args.dry_run, n_runs=args.n_runs))

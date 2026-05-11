@@ -41,32 +41,32 @@ class TestAnalyzeResponses:
     async def test_brand_mention_detected(self, mock_judge):
         mock_judge.return_value = [(Sentiment.POSITIVE, "recommended")]
         responses = [_make_response("Asana is the best tool for teams.")]
-        mentions, _ = await analyze_responses(responses, [PROMPT_CONFIG])
+        mentions, _, _d = await analyze_responses(responses, [PROMPT_CONFIG])
         assert len(mentions) == 1
         assert mentions[0].brand == "Asana"
 
     async def test_sentiment_assigned_from_judge(self, mock_judge):
         mock_judge.return_value = [(Sentiment.NEGATIVE, "criticized")]
         responses = [_make_response("Asana has some issues.")]
-        mentions, _ = await analyze_responses(responses, [PROMPT_CONFIG])
+        mentions, _, _d = await analyze_responses(responses, [PROMPT_CONFIG])
         assert mentions[0].sentiment == Sentiment.NEGATIVE
 
     async def test_error_response_skipped(self, mock_judge):
         responses = [_make_response("", error="API timeout")]
-        mentions, citations = await analyze_responses(responses, [PROMPT_CONFIG])
+        mentions, citations, discovered = await analyze_responses(responses, [PROMPT_CONFIG])
         assert mentions == []
         assert citations == []
 
     async def test_empty_text_skipped(self, mock_judge):
         responses = [_make_response("")]
-        mentions, citations = await analyze_responses(responses, [PROMPT_CONFIG])
+        mentions, _, _d = await analyze_responses(responses, [PROMPT_CONFIG])
         assert mentions == []
 
     async def test_citation_extracted(self, mock_judge):
         mock_judge.return_value = [(Sentiment.NEUTRAL, "factual")]
         text = "Asana is great. See https://www.g2.com/categories/project-management"
         responses = [_make_response(text)]
-        _, citations = await analyze_responses(responses, [PROMPT_CONFIG])
+        _, citations, _d = await analyze_responses(responses, [PROMPT_CONFIG])
         assert len(citations) == 1
         assert citations[0].domain_type == "review_site"
 
@@ -77,7 +77,7 @@ class TestAnalyzeResponses:
         ]
         text = "Asana is great. Jira is also popular."
         responses = [_make_response(text)]
-        mentions, _ = await analyze_responses(responses, [PROMPT_CONFIG])
+        mentions, _, _d = await analyze_responses(responses, [PROMPT_CONFIG])
         brands = {m.brand for m in mentions}
         assert "Asana" in brands
         assert "Jira" in brands
@@ -89,15 +89,22 @@ class TestAnalyzeResponses:
         ]
         text = "First use Jira, then consider Asana."
         responses = [_make_response(text)]
-        mentions, _ = await analyze_responses(responses, [PROMPT_CONFIG])
+        mentions, _, _d = await analyze_responses(responses, [PROMPT_CONFIG])
         by_brand = {m.brand: m.position for m in mentions}
         assert by_brand["Jira"] < by_brand["Asana"]
 
     async def test_no_brands_in_text(self, mock_judge):
         responses = [_make_response("Nothing useful here.")]
-        mentions, _ = await analyze_responses(responses, [PROMPT_CONFIG])
+        mentions, _, _d = await analyze_responses(responses, [PROMPT_CONFIG])
         assert mentions == []
         mock_judge.assert_not_called()
+
+    async def test_discovered_competitors_returned(self, mock_judge):
+        mock_judge.return_value = [(Sentiment.POSITIVE, "good")]
+        text = "Asana is great. Also consider Notion for notes."
+        responses = [_make_response(text)]
+        _, _, discovered = await analyze_responses(responses, [PROMPT_CONFIG])
+        assert isinstance(discovered, list)
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +131,7 @@ class TestAnalyzeVotedResponses:
     async def test_brand_mention_created_from_voted(self, mock_judge):
         rep = _make_response("Asana is the best tool.")
         voted = [(rep, [_make_voted_mention("Asana", 1)])]
-        mentions, _ = await analyze_voted_responses(voted, [rep])
+        mentions, _, _d = await analyze_voted_responses(voted, [rep])
         assert len(mentions) == 1
         assert mentions[0].brand == "Asana"
         assert mentions[0].position == 1
@@ -133,7 +140,7 @@ class TestAnalyzeVotedResponses:
         mock_judge.return_value = [(Sentiment.NEGATIVE, "bad")]
         rep = _make_response("Asana has issues.")
         voted = [(rep, [_make_voted_mention("Asana", 1)])]
-        mentions, _ = await analyze_voted_responses(voted, [rep])
+        mentions, _, _d = await analyze_voted_responses(voted, [rep])
         assert mentions[0].sentiment == Sentiment.NEGATIVE
 
     async def test_citations_extracted_from_all_responses(self, mock_judge):
@@ -141,7 +148,7 @@ class TestAnalyzeVotedResponses:
         rep = _make_response("Asana is ok. See https://www.g2.com/pm")
         extra = _make_response("Also see https://techcrunch.com/asana")
         voted = [(rep, [_make_voted_mention("Asana", 1)])]
-        _, citations = await analyze_voted_responses(voted, [rep, extra])
+        _, citations, _d = await analyze_voted_responses(voted, [rep, extra])
         domain_types = {c.domain_type for c in citations}
         assert "review_site" in domain_types
         assert "tech_media" in domain_types
@@ -152,7 +159,7 @@ class TestAnalyzeVotedResponses:
         r1 = _make_response(f"Asana is ok. See {url}")
         r2 = _make_response(f"Asana again. See {url}")
         voted = [(r1, [_make_voted_mention("Asana", 1)])]
-        _, citations = await analyze_voted_responses(voted, [r1, r2])
+        _, citations, _d = await analyze_voted_responses(voted, [r1, r2])
         assert len(citations) == 1
 
     async def test_error_responses_skipped_for_citations(self, mock_judge):
@@ -160,18 +167,19 @@ class TestAnalyzeVotedResponses:
         rep = _make_response("Asana is ok. See https://www.g2.com/pm")
         err = _make_response("", error="timeout")
         voted = [(rep, [_make_voted_mention("Asana", 1)])]
-        _, citations = await analyze_voted_responses(voted, [rep, err])
+        _, citations, _d = await analyze_voted_responses(voted, [rep, err])
         assert len(citations) == 1
 
     async def test_empty_voted_returns_empty(self, mock_judge):
-        mentions, citations = await analyze_voted_responses([], [])
+        mentions, citations, discovered = await analyze_voted_responses([], [])
         assert mentions == []
         assert citations == []
+        assert discovered == []
         mock_judge.assert_not_called()
 
     async def test_no_brands_no_judge_call(self, mock_judge):
         rep = _make_response("Nothing here.")
         voted = [(rep, [])]
-        mentions, _ = await analyze_voted_responses(voted, [rep])
+        mentions, _, _d = await analyze_voted_responses(voted, [rep])
         assert mentions == []
         mock_judge.assert_not_called()

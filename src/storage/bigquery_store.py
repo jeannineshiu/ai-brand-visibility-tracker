@@ -1,7 +1,9 @@
 """BigQuery storage backend — used for production."""
+import json
+from datetime import datetime
 from google.cloud import bigquery
 from src.utils.config import GCP_PROJECT_ID, BIGQUERY_DATASET
-from src.utils.models import LLMResponse, BrandMention, CitationSource
+from src.utils.models import LLMResponse, BrandMention, CitationSource, PromptConfig
 from src.storage.schema import BIGQUERY_SCHEMAS
 
 _client: bigquery.Client | None = None
@@ -89,3 +91,72 @@ def save_citations(citations: list[CitationSource]):
 def query_df(sql: str):
     """Return BigQuery query result as a pandas DataFrame."""
     return get_client().query(sql).to_dataframe()
+
+
+def save_prompt(p: PromptConfig) -> None:
+    tbl = _table_ref("prompts")
+    client = get_client()
+    sql = f"""
+    MERGE `{tbl}` T
+    USING (SELECT @prompt_id AS prompt_id) S ON T.prompt_id = S.prompt_id
+    WHEN MATCHED THEN UPDATE SET
+        prompt_text=@prompt_text, category=@category,
+        target_brands=@target_brands, created_at=@created_at
+    WHEN NOT MATCHED THEN INSERT
+        (prompt_id, prompt_text, category, target_brands, created_at)
+        VALUES (@prompt_id, @prompt_text, @category, @target_brands, @created_at)
+    """
+    job_config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("prompt_id", "STRING", p.prompt_id),
+        bigquery.ScalarQueryParameter("prompt_text", "STRING", p.prompt_text),
+        bigquery.ScalarQueryParameter("category", "STRING", p.category),
+        bigquery.ScalarQueryParameter("target_brands", "STRING", json.dumps(p.target_brands)),
+        bigquery.ScalarQueryParameter("created_at", "STRING", datetime.utcnow().isoformat()),
+    ])
+    client.query(sql, job_config=job_config).result()
+
+
+def list_prompts() -> list[PromptConfig]:
+    tbl = _table_ref("prompts")
+    rows = get_client().query(
+        f"SELECT prompt_id, prompt_text, category, target_brands FROM `{tbl}` ORDER BY created_at"
+    ).result()
+    return [
+        PromptConfig(
+            prompt_id=r.prompt_id,
+            prompt_text=r.prompt_text,
+            category=r.category,
+            target_brands=json.loads(r.target_brands),
+        )
+        for r in rows
+    ]
+
+
+def get_prompt(prompt_id: str) -> PromptConfig | None:
+    tbl = _table_ref("prompts")
+    job_config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("prompt_id", "STRING", prompt_id),
+    ])
+    rows = list(get_client().query(
+        f"SELECT prompt_id, prompt_text, category, target_brands FROM `{tbl}` WHERE prompt_id=@prompt_id",
+        job_config=job_config,
+    ).result())
+    if not rows:
+        return None
+    r = rows[0]
+    return PromptConfig(
+        prompt_id=r.prompt_id, prompt_text=r.prompt_text,
+        category=r.category, target_brands=json.loads(r.target_brands),
+    )
+
+
+def delete_prompt(prompt_id: str) -> bool:
+    tbl = _table_ref("prompts")
+    job_config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("prompt_id", "STRING", prompt_id),
+    ])
+    get_client().query(
+        f"DELETE FROM `{tbl}` WHERE prompt_id=@prompt_id",
+        job_config=job_config,
+    ).result()
+    return True

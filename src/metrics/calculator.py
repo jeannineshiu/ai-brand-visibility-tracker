@@ -63,8 +63,12 @@ def visibility_summary(brands: list[str] | None = None) -> pd.DataFrame:
     else:
         total_sql = f"SELECT COUNT(DISTINCT run_id || prompt_id || provider) FROM {lr}"
     total_df = query_df(total_sql)
-    total = int(total_df.iloc[0, 0]) if not total_df.empty else 1
+    if df.empty:
+        df["visibility_pct"] = pd.Series(dtype=float)
+        return df
 
+    total = int(total_df.iloc[0, 0]) if not total_df.empty else 1
+    total = max(total, 1)
     df["visibility_pct"] = (df["mentions"] / total * 100).round(1)
     return df
 
