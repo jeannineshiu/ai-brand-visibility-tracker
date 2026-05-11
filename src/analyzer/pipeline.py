@@ -6,7 +6,7 @@ from src.utils.models import LLMResponse, BrandMention, CitationSource, PromptCo
 from src.analyzer.brand_detector import detect_brands
 from src.analyzer.sentiment_judge import judge_batch
 from src.analyzer.citation_extractor import extract_citations
-from src.prompt_runner.vote import VotedMention
+from src.analyzer.vote import VotedMention
 
 console = Console()
 

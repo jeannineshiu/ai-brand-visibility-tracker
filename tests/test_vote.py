@@ -1,6 +1,6 @@
 """Unit tests for prompt_runner/vote.py"""
 import pytest
-from src.prompt_runner.vote import majority_vote, VotedMention
+from src.analyzer.vote import majority_vote, VotedMention
 from src.utils.models import LLMResponse, LLMProvider, PromptConfig
 
 

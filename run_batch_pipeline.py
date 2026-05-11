@@ -16,7 +16,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeEl
 
 from data.prompts_batch import BATCH_PROMPTS
 from src.prompt_runner.runner import run_prompts
-from src.prompt_runner.vote import majority_vote
+from src.analyzer.vote import majority_vote
 from src.analyzer.pipeline import analyze_responses, analyze_voted_responses
 from src.storage import store
 

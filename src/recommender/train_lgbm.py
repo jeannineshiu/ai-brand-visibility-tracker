@@ -19,9 +19,10 @@ from sklearn.metrics import mean_absolute_error, r2_score
 from src.storage.store import query_df, _USE_BIGQUERY
 from src.utils.config import GCP_PROJECT_ID, BIGQUERY_DATASET
 
-MODEL_PATH = Path("data/lgbm_opportunity_model.pkl")
-ENCODER_PATH = Path("data/lgbm_label_encoder.pkl")
-FEATURES_DF_PATH = Path("data/lgbm_features_df.pkl")
+_ROOT = Path(__file__).parent.parent.parent
+MODEL_PATH = _ROOT / "data" / "lgbm_opportunity_model.pkl"
+ENCODER_PATH = _ROOT / "data" / "lgbm_label_encoder.pkl"
+FEATURES_DF_PATH = _ROOT / "data" / "lgbm_features_df.pkl"
 
 DOMAIN_TYPE_WEIGHTS = {
     "review_site": 1.0, "tech_media": 0.9, "business_media": 0.8,
