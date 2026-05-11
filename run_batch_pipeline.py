@@ -11,7 +11,6 @@ Run twice to get 240 rows for LightGBM training.
 """
 import asyncio
 import argparse
-import sys
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 

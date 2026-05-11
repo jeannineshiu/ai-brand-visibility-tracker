@@ -48,8 +48,11 @@ def detect_brands(response_text: str, target_brands: list[str]) -> list[RawMenti
 
     # Sort by appearance order, assign 1-based positions
     mentions.sort(key=lambda m: m.char_offset)
-    for i, m in enumerate(mentions):
-        m.position = i + 1
+    mentions = [
+        RawMention(brand=m.brand, position=i + 1,
+                   char_offset=m.char_offset, snippet=m.snippet)
+        for i, m in enumerate(mentions)
+    ]
 
     return mentions
 

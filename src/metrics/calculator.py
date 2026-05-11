@@ -11,6 +11,11 @@ def _tbl(name: str) -> str:
     return name
 
 
+def _safe(value: str) -> str:
+    """Escape single quotes to prevent SQL injection in brand/label strings."""
+    return value.replace("'", "''")
+
+
 def _sentiment_count(value: str) -> str:
     """SQL fragment for counting a sentiment value — BigQuery vs SQLite differ."""
     if _USE_BIGQUERY:
@@ -73,7 +78,7 @@ def position_trend(brand: str) -> pd.DataFrame:
         AVG(position)     AS avg_position,
         COUNT(*)          AS mention_count
     FROM {bm}
-    WHERE brand = '{brand}'
+    WHERE brand = '{_safe(brand)}'
     GROUP BY DATE(created_at)
     ORDER BY date
     """
@@ -93,7 +98,7 @@ def sentiment_trend(brand: str, window: int = 7) -> pd.DataFrame:
         END) AS sentiment_score,
         COUNT(*) AS mentions
     FROM {bm}
-    WHERE brand = '{brand}'
+    WHERE brand = '{_safe(brand)}'
     GROUP BY DATE(created_at)
     ORDER BY date
     """
@@ -110,7 +115,7 @@ def competitor_gap(target_brand: str) -> pd.DataFrame:
     WITH target_prompts AS (
         SELECT DISTINCT run_id, prompt_id, provider
         FROM {bm}
-        WHERE brand = '{target_brand}'
+        WHERE brand = '{_safe(target_brand)}'
     ),
     all_prompts AS (
         SELECT DISTINCT run_id, prompt_id, provider
@@ -130,7 +135,7 @@ def competitor_gap(target_brand: str) -> pd.DataFrame:
     FROM {bm} bm
     JOIN missing_prompts mp
       ON bm.run_id=mp.run_id AND bm.prompt_id=mp.prompt_id AND bm.provider=mp.provider
-    WHERE bm.brand != '{target_brand}'
+    WHERE bm.brand != '{_safe(target_brand)}'
     GROUP BY bm.brand
     ORDER BY appears_when_target_absent DESC
     """

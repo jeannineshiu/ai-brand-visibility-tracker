@@ -1,10 +1,9 @@
 """Orchestrates brand detection + sentiment + citation extraction for a batch of LLM responses."""
-import asyncio
 from rich.console import Console
 from rich.table import Table
 
 from src.utils.models import LLMResponse, BrandMention, CitationSource, PromptConfig
-from src.analyzer.brand_detector import detect_brands, extract_entities
+from src.analyzer.brand_detector import detect_brands
 from src.analyzer.sentiment_judge import judge_batch
 from src.analyzer.citation_extractor import extract_citations
 
@@ -24,10 +23,10 @@ async def analyze_responses(
     all_citations: list[CitationSource] = []
 
     # --- Phase 1: Brand detection + Citation extraction (CPU, fast) ---
-    raw_mentions_per_response = []
+    raw_mentions_per_response: list[tuple] = []
     for resp in responses:
         if resp.error or not resp.response_text:
-            raw_mentions_per_response.append([])
+            raw_mentions_per_response.append((resp, []))
             continue
 
         target_brands = prompt_map.get(resp.prompt_id, PromptConfig(
@@ -52,10 +51,9 @@ async def analyze_responses(
     judge_inputs: list[tuple[str, str]] = []   # (brand, snippet)
     judge_meta: list[tuple[LLMResponse, object]] = []   # parallel tracking
 
-    for item in raw_mentions_per_response:
-        if not item:
+    for resp, raw_list in raw_mentions_per_response:
+        if not raw_list:
             continue
-        resp, raw_list = item
         for raw in raw_list:
             judge_inputs.append((raw.brand, raw.snippet))
             judge_meta.append((resp, raw))

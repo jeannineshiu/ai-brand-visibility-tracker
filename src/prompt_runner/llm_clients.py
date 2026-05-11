@@ -88,7 +88,7 @@ class GeminiClient:
     def __init__(self, model: Optional[str] = None):
         from google import genai
         self.client = genai.Client(api_key=GOOGLE_API_KEY)
-        self.model_name = model or DEFAULT_MODEL_MAP["gemini"]
+        self.model = model or DEFAULT_MODEL_MAP["gemini"]
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
     async def query(self, prompt_id: str, prompt_text: str, run_id: str) -> LLMResponse:
@@ -96,7 +96,7 @@ class GeminiClient:
         try:
             resp = await asyncio.to_thread(
                 self.client.models.generate_content,
-                model=self.model_name,
+                model=self.model,
                 contents=prompt_text,
             )
             latency = int((time.time() - start) * 1000)
@@ -105,7 +105,7 @@ class GeminiClient:
                 prompt_id=prompt_id,
                 prompt_text=prompt_text,
                 provider=LLMProvider.GEMINI,
-                model=self.model_name,
+                model=self.model,
                 response_text=resp.text,
                 latency_ms=latency,
             )
@@ -115,7 +115,7 @@ class GeminiClient:
                 prompt_id=prompt_id,
                 prompt_text=prompt_text,
                 provider=LLMProvider.GEMINI,
-                model=self.model_name,
+                model=self.model,
                 response_text="",
                 latency_ms=int((time.time() - start) * 1000),
                 error=str(e),

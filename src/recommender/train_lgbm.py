@@ -139,7 +139,7 @@ def build_training_data() -> pd.DataFrame:
     return df
 
 
-def train(df: pd.DataFrame) -> tuple[lgb.LGBMRegressor, LabelEncoder]:
+def train(df: pd.DataFrame) -> tuple[lgb.LGBMRegressor, LabelEncoder, list[str]]:
     """Train LightGBM on the feature matrix."""
     le = LabelEncoder()
     df = df.copy()
