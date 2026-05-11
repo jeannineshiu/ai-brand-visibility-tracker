@@ -146,6 +146,26 @@ def competitor_gap(target_brand: str) -> pd.DataFrame:
     return query_df(sql)
 
 
+def list_tracked_brands() -> list[str]:
+    """Return all distinct brands in the database, sorted alphabetically."""
+    bm = _tbl("brand_mentions")
+    df = query_df(f"SELECT DISTINCT brand FROM {bm} ORDER BY brand")
+    return df["brand"].tolist() if not df.empty else []
+
+
+def provider_breakdown(brand: str) -> pd.DataFrame:
+    """Mentions by provider × sentiment for a brand."""
+    bm = _tbl("brand_mentions")
+    sql = f"""
+    SELECT provider, sentiment, COUNT(*) AS count
+    FROM {bm}
+    WHERE brand = '{_safe(brand)}'
+    GROUP BY provider, sentiment
+    ORDER BY provider, sentiment
+    """
+    return query_df(sql)
+
+
 def citation_type_breakdown() -> pd.DataFrame:
     """Count citations by domain_type."""
     cs = _tbl("citation_sources")

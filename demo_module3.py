@@ -56,7 +56,7 @@ async def main():
     if run_id and store.run_exists(run_id):
         print(f"\nRun {run_id} already in DB — skipping insert.")
     else:
-        mentions, citations = await analyze_responses(ok, PROMPTS)
+        mentions, citations, _ = await analyze_responses(ok, PROMPTS)
         store.save_responses(ok)
         store.save_mentions(mentions)
         store.save_citations(citations)
