@@ -18,9 +18,10 @@ flowchart TD
         B --> C2[Anthropic\nclaude-haiku-4-5]
         B --> C3[Gemini\n2.5-flash]
         B --> C4[MockClient\nauto-fallback]
+        C1 & C2 & C3 & C4 --> V[vote.py\nmajority voting n=3]
     end
 
-    C1 & C2 & C3 & C4 --> D[(Raw JSON\ndata/raw/)]
+    V --> D[(Raw JSON\ndata/raw/)]
 
     subgraph M2["Module 2 — Brand & Source Analyzer"]
         D --> E1[Brand Detector\nregex + spaCy NER]
@@ -43,7 +44,7 @@ flowchart TD
         H[feature_engineer.py\nco-occurrence features]
         H --> I1[LightGBM\nR²=0.80]
         H --> I2[Rule-based scorer\nfallback]
-        I1 & I2 --> J[FastAPI :8000\n/recommendations\n/retrain\n/visibility]
+        I1 & I2 --> J[FastAPI :8000\n/recommendations\n/retrain 🔒\n/visibility]
     end
 
     style M1 fill:#dbeafe,stroke:#3b82f6
@@ -55,6 +56,8 @@ flowchart TD
 ### Module 1 — Prompt Runner
 Queries multiple LLM APIs concurrently using `asyncio.gather`. Supports OpenAI, Anthropic, and Gemini. Automatically falls back to a `MockClient` when an API key is missing or invalid.
 
+Includes **majority voting** (`vote.py`): run each prompt N times and keep only brands that appear in more than half the trials. Eliminates false positives caused by LLM non-determinism.
+
 ### Module 2 — Brand & Source Analyzer
 Parses LLM responses to extract:
 - **Brand mentions** — which brands appear, in what position order, with what sentiment
@@ -65,7 +68,7 @@ Parses LLM responses to extract:
 Persists results to BigQuery (production) or SQLite (local dev) with a unified interface. Computes time-series metrics: visibility %, position trend, sentiment moving average, competitor gap. Visualized with a Plotly Dash dashboard.
 
 ### Module 4 — Recommendation Engine
-Trains a LightGBM model on citation co-occurrence features to predict opportunity scores per domain type. Served via FastAPI with a `/retrain` endpoint for hot model updates without server restart.
+Trains a LightGBM model on citation co-occurrence features to predict opportunity scores per domain type. Served via FastAPI. `/retrain` requires an API key and reloads the model in memory without server restart.
 
 ---
 
@@ -81,6 +84,7 @@ Trains a LightGBM model on citation co-occurrence features to predict opportunit
 | Visualization | Plotly Dash |
 | API | FastAPI, Uvicorn |
 | Data | pandas, Pydantic |
+| Testing | pytest, pytest-asyncio |
 | Infra | Docker, python-dotenv |
 
 ---
@@ -92,7 +96,8 @@ ai-brand-visibility-tracker/
 ├── src/
 │   ├── prompt_runner/
 │   │   ├── llm_clients.py      # OpenAI / Anthropic / Gemini / Mock clients
-│   │   └── runner.py           # asyncio concurrent query engine
+│   │   ├── runner.py           # asyncio concurrent query engine (n_runs support)
+│   │   └── vote.py             # majority voting across N trials
 │   ├── analyzer/
 │   │   ├── brand_detector.py   # regex + spaCy NER brand matching
 │   │   ├── sentiment_judge.py  # LLM-as-judge sentiment scoring
@@ -114,6 +119,13 @@ ai-brand-visibility-tracker/
 │   └── utils/
 │       ├── config.py           # env vars + paths
 │       └── models.py           # Pydantic data models
+├── tests/
+│   ├── test_brand_detector.py  # 13 tests: regex, word boundary, position order
+│   ├── test_citation_extractor.py # 16 tests: domain classification, URL parsing
+│   ├── test_pipeline.py        # 8 tests: async pipeline with mocked LLM judge
+│   ├── test_scorer.py          # 10 tests: opportunity score calculation
+│   ├── test_retrain_auth.py    # 4 tests: API key auth on /retrain
+│   └── test_vote.py            # 10 tests: majority voting logic
 ├── data/
 │   ├── prompts_batch.py        # 40 prompts across 4 SaaS categories
 │   └── raw/                    # raw LLM response JSONs (gitignored)
@@ -123,6 +135,7 @@ ai-brand-visibility-tracker/
 ├── demo_module4.py             # launch FastAPI
 ├── demo_lgbm.py                # train LightGBM + show results
 ├── run_batch_pipeline.py       # batch data generation (40 prompts × 3 LLMs)
+├── pytest.ini
 ├── Dockerfile
 └── environment.yml
 ```
@@ -170,6 +183,9 @@ GOOGLE_API_KEY=AIzaSy...
 GCP_PROJECT_ID=your-project-id
 BIGQUERY_DATASET=brand_tracker
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+
+# Required to call POST /retrain — set a strong random string
+RETRAIN_API_KEY=your-secret-key
 ```
 
 ### 3. (Optional) GCP / BigQuery setup
@@ -210,12 +226,21 @@ python run_batch_pipeline.py
 
 # Run one category only (cheaper test)
 python run_batch_pipeline.py --category crm
+
+# Run with majority voting — 3 trials per prompt for stable brand detection
+python run_batch_pipeline.py --n-runs 3 --category crm
 ```
 
 ### Train LightGBM model
 
 ```bash
 python demo_lgbm.py
+```
+
+### Run tests
+
+```bash
+pytest -v
 ```
 
 ### API endpoints
@@ -234,8 +259,9 @@ curl "http://localhost:8000/visibility?brands=Asana,Jira,Monday.com"
 # Competitor gap analysis
 curl http://localhost:8000/competitor-gap/Asana
 
-# Retrain model on latest data (no server restart needed)
-curl -X POST http://localhost:8000/retrain
+# Retrain model on latest data — requires API key
+curl -X POST http://localhost:8000/retrain \
+  -H "X-API-Key: your-secret-key"
 ```
 
 Interactive API docs: `http://localhost:8000/docs`

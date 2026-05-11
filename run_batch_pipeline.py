@@ -16,7 +16,8 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeEl
 
 from data.prompts_batch import BATCH_PROMPTS
 from src.prompt_runner.runner import run_prompts
-from src.analyzer.pipeline import analyze_responses
+from src.prompt_runner.vote import majority_vote
+from src.analyzer.pipeline import analyze_responses, analyze_voted_responses
 from src.storage import store
 
 console = Console()
@@ -25,7 +26,7 @@ BATCH_SIZE = 10      # prompts per batch (avoids rate limits)
 BATCH_PAUSE = 3      # seconds between batches
 
 
-async def run_pipeline(prompts, dry_run: bool = False):
+async def run_pipeline(prompts, dry_run: bool = False, n_runs: int = 1):
     """Run prompts in batches, analyze, and save each batch to DB."""
     store.init()
 
@@ -35,7 +36,8 @@ async def run_pipeline(prompts, dry_run: bool = False):
 
     console.print(f"\n[bold]Starting batch pipeline[/]")
     console.print(f"Prompts: [cyan]{total}[/]  Batch size: [cyan]{BATCH_SIZE}[/]  "
-                  f"Estimated queries: [cyan]{total * 3}[/]")
+                  f"Estimated queries: [cyan]{total * 3 * n_runs}[/]"
+                  + (f"  Majority voting: [cyan]{n_runs} runs[/]" if n_runs > 1 else ""))
 
     if dry_run:
         console.print("\n[yellow]DRY RUN — listing prompts only:[/]")
@@ -58,8 +60,10 @@ async def run_pipeline(prompts, dry_run: bool = False):
         for i, batch in enumerate(batches):
             progress.update(task, description=f"Batch {i+1}/{len(batches)} ({batch[0].category})")
 
-            # 1. Query all LLMs
-            responses = await run_prompts(batch, providers=["openai", "anthropic", "gemini"])
+            # 1. Query all LLMs (n_runs trials if majority voting enabled)
+            responses = await run_prompts(
+                batch, providers=["openai", "anthropic", "gemini"], n_runs=n_runs
+            )
             ok = [r for r in responses if not r.error and r.response_text]
 
             if not ok:
@@ -67,15 +71,20 @@ async def run_pipeline(prompts, dry_run: bool = False):
                 progress.advance(task)
                 continue
 
-            # 2. Skip if already saved
+            # 2. Skip if already saved (check first trial's run_id)
             run_id = ok[0].run_id
-            if store.run_exists(run_id):
-                console.print(f"  [dim]Batch {i+1}: run {run_id} already saved, skipping[/]")
+            base_run_id = run_id.split("-t")[0]
+            if store.run_exists(base_run_id) or store.run_exists(run_id):
+                console.print(f"  [dim]Batch {i+1}: run already saved, skipping[/]")
                 progress.advance(task)
                 continue
 
-            # 3. Analyze
-            mentions, citations = await analyze_responses(ok, batch)
+            # 3. Analyze — use voting path when n_runs > 1
+            if n_runs > 1:
+                voted = majority_vote(ok, batch, n_runs=n_runs)
+                mentions, citations = await analyze_voted_responses(voted, ok)
+            else:
+                mentions, citations = await analyze_responses(ok, batch)
             all_mentions.extend(mentions)
             all_citations.extend(citations)
 
@@ -108,6 +117,8 @@ def parse_args():
     parser.add_argument("--dry-run", action="store_true", help="List prompts without making API calls")
     parser.add_argument("--category", choices=["project_management", "crm", "ai_writing", "developer_tools"],
                         help="Run only one category")
+    parser.add_argument("--n-runs", type=int, default=1, choices=[1, 3, 5],
+                        help="Trials per prompt for majority voting (default: 1, no voting)")
     return parser.parse_args()
 
 
@@ -119,4 +130,4 @@ if __name__ == "__main__":
         prompts = [p for p in BATCH_PROMPTS if p.category == args.category]
         console.print(f"[dim]Filtered to category: {args.category} ({len(prompts)} prompts)[/]")
 
-    asyncio.run(run_pipeline(prompts, dry_run=args.dry_run))
+    asyncio.run(run_pipeline(prompts, dry_run=args.dry_run, n_runs=args.n_runs))

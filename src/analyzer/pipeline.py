@@ -6,6 +6,7 @@ from src.utils.models import LLMResponse, BrandMention, CitationSource, PromptCo
 from src.analyzer.brand_detector import detect_brands
 from src.analyzer.sentiment_judge import judge_batch
 from src.analyzer.citation_extractor import extract_citations
+from src.prompt_runner.vote import VotedMention
 
 console = Console()
 
@@ -69,6 +70,63 @@ async def analyze_responses(
             position=raw.position,
             sentiment=sentiment,
             snippet=raw.snippet,
+        ))
+
+    _print_analysis_summary(all_mentions, all_citations)
+    return all_mentions, all_citations
+
+
+async def analyze_voted_responses(
+    voted: list[tuple[LLMResponse, list[VotedMention]]],
+    all_responses: list[LLMResponse],
+) -> tuple[list[BrandMention], list[CitationSource]]:
+    """
+    Pipeline variant for majority-voted brand mentions.
+
+    - voted: output of majority_vote() — one (rep_response, voted_mentions) per (prompt, provider)
+    - all_responses: every response across all N trials, used for citation aggregation
+    """
+    all_mentions: list[BrandMention] = []
+    all_citations: list[CitationSource] = []
+
+    # Citations: extract from ALL trial responses and deduplicate by (prompt, provider, url)
+    seen_citations: set[tuple] = set()
+    for resp in all_responses:
+        if resp.error or not resp.response_text:
+            continue
+        for cite in extract_citations(resp.response_text):
+            key = (resp.prompt_id, resp.provider, cite.url)
+            if key not in seen_citations:
+                seen_citations.add(key)
+                all_citations.append(CitationSource(
+                    run_id=resp.run_id,
+                    prompt_id=resp.prompt_id,
+                    provider=resp.provider,
+                    url=cite.url,
+                    domain=cite.domain,
+                    domain_type=cite.domain_type,
+                ))
+
+    # Sentiment judging on voted brands only
+    judge_inputs: list[tuple[str, str]] = []
+    judge_meta: list[tuple[LLMResponse, VotedMention]] = []
+
+    for rep_resp, voted_mentions in voted:
+        for vm in voted_mentions:
+            judge_inputs.append((vm.brand, vm.snippet))
+            judge_meta.append((rep_resp, vm))
+
+    sentiments = await judge_batch(judge_inputs) if judge_inputs else []
+
+    for (resp, vm), (sentiment, _reason) in zip(judge_meta, sentiments):
+        all_mentions.append(BrandMention(
+            run_id=resp.run_id,
+            prompt_id=resp.prompt_id,
+            provider=resp.provider,
+            brand=vm.brand,
+            position=vm.position,
+            sentiment=sentiment,
+            snippet=vm.snippet,
         ))
 
     _print_analysis_summary(all_mentions, all_citations)

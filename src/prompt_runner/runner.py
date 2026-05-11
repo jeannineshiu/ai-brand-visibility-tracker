@@ -34,27 +34,36 @@ async def run_prompts(
     prompts: list[PromptConfig],
     providers: Optional[list[str]] = None,
     run_id: Optional[str] = None,
+    n_runs: int = 1,
 ) -> list[LLMResponse]:
-    """Query all providers for all prompts concurrently."""
+    """Query all providers for all prompts concurrently.
+
+    n_runs > 1 runs each (prompt, provider) pair N times for majority voting.
+    Each trial gets its own run_id: {base_id}-t0, {base_id}-t1, …
+    """
     providers = providers or ["openai", "anthropic", "gemini"]
-    run_id = run_id or str(uuid.uuid4())[:8]
-    clients = {p: _build_client(p) for p in providers}
+    base_id = run_id or str(uuid.uuid4())[:8]
 
-    tasks = [
-        client.query(p.prompt_id, p.prompt_text, run_id)
-        for p in prompts
-        for provider, client in clients.items()
-    ]
+    all_responses: list[LLMResponse] = []
+    for trial in range(n_runs):
+        trial_id = f"{base_id}-t{trial}" if n_runs > 1 else base_id
+        clients = {p: _build_client(p) for p in providers}
+        tasks = [
+            client.query(p.prompt_id, p.prompt_text, trial_id)
+            for p in prompts
+            for provider, client in clients.items()
+        ]
+        label = f" (trial {trial + 1}/{n_runs})" if n_runs > 1 else ""
+        console.print(f"\n[bold cyan]Run ID:[/] {trial_id}{label}")
+        console.print(f"[bold cyan]Prompts:[/] {len(prompts)}  [bold cyan]Providers:[/] {providers}")
+        console.print(f"[bold cyan]Total queries:[/] {len(tasks)}\n")
 
-    console.print(f"\n[bold cyan]Run ID:[/] {run_id}")
-    console.print(f"[bold cyan]Prompts:[/] {len(prompts)}  [bold cyan]Providers:[/] {providers}")
-    console.print(f"[bold cyan]Total queries:[/] {len(tasks)}\n")
+        results: list[LLMResponse] = await asyncio.gather(*tasks)
+        _print_summary(results)
+        _save_raw(results, trial_id)
+        all_responses.extend(results)
 
-    results: list[LLMResponse] = await asyncio.gather(*tasks)
-
-    _print_summary(results)
-    _save_raw(results, run_id)
-    return results
+    return all_responses
 
 
 def _print_summary(results: list[LLMResponse]):
