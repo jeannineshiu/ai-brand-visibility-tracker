@@ -21,6 +21,7 @@ from src.utils.config import GCP_PROJECT_ID, BIGQUERY_DATASET
 
 MODEL_PATH = Path("data/lgbm_opportunity_model.pkl")
 ENCODER_PATH = Path("data/lgbm_label_encoder.pkl")
+FEATURES_DF_PATH = Path("data/lgbm_features_df.pkl")
 
 DOMAIN_TYPE_WEIGHTS = {
     "review_site": 1.0, "tech_media": 0.9, "business_media": 0.8,
@@ -184,16 +185,18 @@ def train(df: pd.DataFrame) -> tuple[lgb.LGBMRegressor, LabelEncoder, list[str]]
     return model, le, features
 
 
-def save_model(model, le, features):
+def save_model(model, le, features, df: pd.DataFrame | None = None):
     with open(MODEL_PATH, "wb") as f:
         pickle.dump({"model": model, "features": features}, f)
     with open(ENCODER_PATH, "wb") as f:
         pickle.dump(le, f)
+    if df is not None:
+        df.to_pickle(FEATURES_DF_PATH)
     print(f"  Model saved → {MODEL_PATH}")
 
 
 def load_model():
-    """Load saved model. Returns (model, features, label_encoder) or None."""
+    """Load saved model and feature DataFrame. Returns (model, features, label_encoder) or Nones."""
     if not MODEL_PATH.exists():
         return None, None, None
     with open(MODEL_PATH, "rb") as f:
@@ -201,6 +204,13 @@ def load_model():
     with open(ENCODER_PATH, "rb") as f:
         le = pickle.load(f)
     return obj["model"], obj["features"], le
+
+
+def load_features_df() -> pd.DataFrame | None:
+    """Load the saved feature DataFrame from the last training run."""
+    if not FEATURES_DF_PATH.exists():
+        return None
+    return pd.read_pickle(FEATURES_DF_PATH)
 
 
 def predict_opportunities(

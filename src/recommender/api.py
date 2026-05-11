@@ -1,34 +1,73 @@
 """FastAPI service exposing recommendation and metrics endpoints."""
-from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Header, Depends
 from pydantic import BaseModel
 from typing import Optional
+import logging
 
+from src.utils.config import RETRAIN_API_KEY
 from src.recommender.feature_engineer import build_source_features, build_brand_features
 from src.recommender.scorer import compute_opportunity_scores, _generate_action
 from src.recommender.train_lgbm import (
-    build_training_data, train, save_model, load_model, predict_opportunities
+    build_training_data, train, save_model, load_model, load_features_df, predict_opportunities
 )
 from src.metrics.calculator import visibility_summary, competitor_gap, citation_type_breakdown
+
+logger = logging.getLogger(__name__)
+
+_lgbm_model = None
+_lgbm_features = None
+_lgbm_encoder = None
+_lgbm_training_df = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _lgbm_model, _lgbm_features, _lgbm_encoder, _lgbm_training_df
+    _lgbm_model, _lgbm_features, _lgbm_encoder = load_model()
+    if _lgbm_model is not None:
+        _lgbm_training_df = load_features_df()
+        logger.info("LightGBM model loaded from disk (features_df=%s).", _lgbm_training_df is not None)
+    else:
+        logger.info("No saved model found — attempting auto-train from available data...")
+        try:
+            df = build_training_data()
+            model, le, features = train(df)
+            save_model(model, le, features, df)
+            _lgbm_model, _lgbm_features, _lgbm_encoder = model, features, le
+            _lgbm_training_df = df
+            logger.info("Auto-train complete: %d rows, %d brands.", len(df), df["brand"].nunique())
+        except Exception as e:
+            logger.warning("Auto-train skipped (no data yet): %s", e)
+    yield
+
 
 app = FastAPI(
     title="AI Brand Visibility Tracker API",
     version="1.0.0",
     description="Track brand visibility in LLM responses and get source recommendations.",
+    lifespan=lifespan,
 )
 
-# Load LightGBM model at startup (if available)
-_lgbm_model, _lgbm_features, _lgbm_encoder = load_model()
-_lgbm_training_df = None  # lazy-loaded
+def _require_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
+    if not RETRAIN_API_KEY:
+        raise HTTPException(status_code=503, detail="RETRAIN_API_KEY not configured on server")
+    if x_api_key != RETRAIN_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+_lgbm_training_df = None
 
 
 def _get_lgbm_df():
-    """Lazy-load training dataframe (BigQuery query, cache in memory)."""
+    """Return feature DataFrame: prefers in-memory cache, then DB query."""
     global _lgbm_training_df
-    if _lgbm_training_df is None:
-        try:
-            _lgbm_training_df = build_training_data()
-        except Exception:
-            _lgbm_training_df = None
+    if _lgbm_training_df is not None:
+        return _lgbm_training_df
+    try:
+        _lgbm_training_df = build_training_data()
+    except Exception:
+        _lgbm_training_df = None
     return _lgbm_training_df
 
 
@@ -129,13 +168,13 @@ def get_recommendations(req: RecommendRequest):
 
 
 @app.post("/retrain")
-def retrain_model():
+def retrain_model(_: None = Depends(_require_api_key)):
     """Retrain LightGBM on latest BigQuery data and reload into memory."""
     global _lgbm_model, _lgbm_features, _lgbm_encoder, _lgbm_training_df
     try:
         df = build_training_data()
         model, le, features = train(df)
-        save_model(model, le, features)
+        save_model(model, le, features, df)
         _lgbm_model, _lgbm_features, _lgbm_encoder = model, features, le
         _lgbm_training_df = df
         return {

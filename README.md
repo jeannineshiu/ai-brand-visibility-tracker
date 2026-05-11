@@ -282,9 +282,17 @@ CitationSource   # url, domain, domain_type (review_site / tech_media / communit
 # Build
 docker build -t brand-tracker .
 
-# Run API server
-docker run -p 8000:8000 --env-file .env brand-tracker
+# Train model locally first (if not already done)
+python demo_lgbm.py
+
+# Run API server — mount ./data so the container can read the trained model and SQLite DB
+docker run -p 8000:8000 --env-file .env -v $(pwd)/data:/app/data brand-tracker
 ```
+
+> **How the model gets loaded:**
+> On startup the API tries to load `data/lgbm_opportunity_model.pkl` from the mounted volume.
+> If no model file is found (e.g. fresh deployment with BigQuery), it attempts to auto-train from
+> available data. If neither is possible it falls back to rule-based scoring.
 
 ---
 

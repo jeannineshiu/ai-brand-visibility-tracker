@@ -20,6 +20,8 @@ GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")
 BIGQUERY_DATASET = os.getenv("BIGQUERY_DATASET", "brand_tracker")
 GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
+RETRAIN_API_KEY = os.getenv("RETRAIN_API_KEY", "")
+
 SUPPORTED_LLMS = ["openai", "anthropic", "gemini"]
 DEFAULT_MODEL_MAP = {
     "openai": "gpt-4o-mini",

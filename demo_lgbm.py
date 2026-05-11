@@ -61,7 +61,7 @@ def main():
     model, le, features = train(df)
 
     # 3. Save
-    save_model(model, le, features)
+    save_model(model, le, features, df)
 
     # 4. Feature importance
     console.print("\n[bold]Step 3: Feature Importance[/]")
