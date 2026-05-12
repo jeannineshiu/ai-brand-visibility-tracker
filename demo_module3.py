@@ -52,6 +52,8 @@ async def main():
 
     # 2. Persist — skip if run_id already in DB
     store.init()
+    from data.prompts_batch import BATCH_PROMPTS
+    store.seed_prompts(BATCH_PROMPTS)
     run_id = ok[0].run_id if ok else None
     if run_id and store.run_exists(run_id):
         print(f"\nRun {run_id} already in DB — skipping insert.")

@@ -4,9 +4,19 @@ import plotly.express as px
 import pandas as pd
 
 from src.metrics.calculator import (
-    visibility_summary, position_trend, competitor_gap,
-    provider_breakdown, list_tracked_brands,
+    visibility_summary_by_category, position_trend, competitor_gap,
+    provider_breakdown, _tbl,
+    brands_by_category, prompts_by_category, category_stats,
 )
+from src.storage.store import query_df
+
+# ── constants ─────────────────────────────────────────────────────────────────
+CAT_LABELS = {
+    "project_management": "Project Management",
+    "crm":                "CRM",
+    "ai_writing":         "AI Writing",
+    "developer_tools":    "Developer Tools",
+}
 
 # ── design tokens ──────────────────────────────────────────────────────────────
 ACCENT  = "#F97316"   # orange — selected brand
@@ -61,7 +71,8 @@ def _empty_fig(msg: str = "No data") -> go.Figure:
 
 
 def _base(fig: go.Figure, title: str, height: int = 320, **kw) -> go.Figure:
-    fig.update_layout(title=title, height=height, **PLOT_LAYOUT, **kw)
+    layout = {**PLOT_LAYOUT, **kw}
+    fig.update_layout(title=title, height=height, **layout)
     return fig
 
 
@@ -90,7 +101,7 @@ def _sentiment_fig(brand: str, df: pd.DataFrame) -> go.Figure:
     df = df.copy()
     df["neutral_rate"] = (100 - df["pos_rate"] - df["neg_rate"]).clip(lower=0)
     lw = [2 if b == brand else 0 for b in df["brand"]]
-    lc = [ACCENT if b == brand else "transparent" for b in df["brand"]]
+    lc = [ACCENT if b == brand else "rgba(0,0,0,0)" for b in df["brand"]]
     fig = go.Figure(data=[
         go.Bar(name="Positive", y=df["brand"], x=df["pos_rate"],
                orientation="h", marker_color="#4ADE80",
@@ -127,8 +138,8 @@ def _position_trend_fig(brand: str) -> go.Figure:
                  margin=dict(l=80, r=40, t=50, b=40))
 
 
-def _competitor_gap_fig(brand: str) -> go.Figure:
-    df = competitor_gap(brand)
+def _competitor_gap_fig(brand: str, category: str | None = None) -> go.Figure:
+    df = competitor_gap(brand, category)
     if df.empty:
         return _empty_fig(f"No competitor gap data for {brand}")
     df = df.head(10)
@@ -228,22 +239,186 @@ def _opportunity_fig(brand: str) -> go.Figure:
     return _empty_fig("Opportunity data unavailable")
 
 
+# ── sidebar helpers ────────────────────────────────────────────────────────────
+
+def _sidebar_stats() -> dict:
+    """Query DB for sidebar statistics, falling back to BATCH_PROMPTS for categories."""
+    try:
+        bm = _tbl("brand_mentions")
+        lr = _tbl("llm_responses")
+        pr = _tbl("prompts")
+        mentions  = query_df(f"SELECT COUNT(*) AS n FROM {bm}")
+        responses = query_df(f"SELECT COUNT(*) AS n FROM {lr}")
+        brands_n  = query_df(f"SELECT COUNT(DISTINCT brand) AS n FROM {bm}")
+        providers = query_df(f"SELECT COUNT(DISTINCT provider) AS n FROM {lr}")
+        dates     = query_df(f"SELECT MIN(DATE(created_at)) AS d0, MAX(DATE(created_at)) AS d1 FROM {lr}")
+        cats      = query_df(f"SELECT category, COUNT(*) AS n FROM {pr} GROUP BY category ORDER BY n DESC")
+
+        # Fall back to BATCH_PROMPTS when prompts table is empty
+        if cats.empty:
+            from data.prompts_batch import BATCH_PROMPTS
+            from collections import Counter
+            counts = Counter(p.category for p in BATCH_PROMPTS)
+            cats_list = [{"category": k, "n": v} for k, v in sorted(counts.items(), key=lambda x: -x[1])]
+        else:
+            cats_list = cats.to_dict("records")
+
+        return {
+            "mentions":  int(mentions.iloc[0, 0])  if not mentions.empty  else 0,
+            "responses": int(responses.iloc[0, 0]) if not responses.empty else 0,
+            "brands":    int(brands_n.iloc[0, 0])  if not brands_n.empty  else 0,
+            "providers": int(providers.iloc[0, 0]) if not providers.empty else 0,
+            "d0": str(dates["d0"].iloc[0]) if not dates.empty else "—",
+            "d1": str(dates["d1"].iloc[0]) if not dates.empty else "—",
+            "cats": cats_list,
+        }
+    except Exception:
+        return {"mentions": 0, "responses": 0, "brands": 0, "providers": 0,
+                "d0": "—", "d1": "—", "cats": []}
+
+
+def _build_sidebar(stats: dict) -> "html.Div":
+    from dash import html
+
+    side_label = {**SECTION_LABEL, "margin": "20px 0 6px 0"}
+
+    # Static row (plain text value)
+    def static_row(label, value):
+        return html.Div([
+            html.Span(label, style={"fontSize": "12px", "color": "#64748B"}),
+            html.Span(value, style={"fontSize": "13px", "fontWeight": "700",
+                                    "color": "#0F172A"}),
+        ], style={"display": "flex", "justifyContent": "space-between",
+                  "padding": "6px 0", "borderBottom": "1px solid #F1F5F9"})
+
+    # Reactive row — value Span has an ID, updated by callback
+    def reactive_row(label, comp_id):
+        return html.Div([
+            html.Span(label, style={"fontSize": "12px", "color": "#64748B"}),
+            html.Span("—", id=comp_id,
+                      style={"fontSize": "13px", "fontWeight": "700",
+                             "color": "#0F172A"}),
+        ], style={"display": "flex", "justifyContent": "space-between",
+                  "padding": "6px 0", "borderBottom": "1px solid #F1F5F9"})
+
+    total_prompts = sum(c["n"] for c in stats["cats"])
+    cat_rows = [
+        html.Div([
+            html.Span(
+                CAT_LABELS.get(c["category"],
+                               c["category"].replace("_", " ").title()),
+                style={"fontSize": "12px", "color": "#475569"},
+            ),
+            html.Span(str(c["n"]),
+                      style={"fontSize": "12px", "fontWeight": "600",
+                             "color": "#0F172A"}),
+        ], style={"display": "flex", "justifyContent": "space-between",
+                  "padding": "3px 0"})
+        for c in stats["cats"]
+    ]
+
+    return html.Div([
+
+        html.Div("About", style=side_label),
+        html.P(
+            "This tool tracks how often your brand appears in AI-generated "
+            "answers across OpenAI, Anthropic, and Gemini — the new discovery "
+            "surface for B2B software buyers.",
+            style={"fontSize": "12px", "color": "#475569",
+                   "lineHeight": "1.7", "margin": "0"},
+        ),
+        html.P(
+            "This discipline is called Generative Engine Optimization (GEO). "
+            "Traditional SEO tracks Google rankings. This tracks AI mindshare.",
+            style={"fontSize": "12px", "color": "#64748B",
+                   "lineHeight": "1.7", "marginTop": "8px"},
+        ),
+
+        # ── Data Volume (reactive — updates when category changes) ────
+        html.Div("Data Volume", style=side_label),
+        reactive_row("Brand Mentions", "sb-mentions"),
+        reactive_row("LLM Responses",  "sb-responses"),
+        reactive_row("Brands Tracked", "sb-brands"),
+        static_row("LLM Providers",    str(stats["providers"])),
+        reactive_row("Date Range",     "sb-dates"),
+
+        # ── Prompt Coverage (static — same for all categories) ────────
+        html.Div("Prompt Coverage", style=side_label),
+        html.P(
+            f"{total_prompts} prompts across {len(stats['cats'])} categories",
+            style={"fontSize": "12px", "color": "#64748B", "margin": "0 0 6px"},
+        ),
+        *cat_rows,
+
+        html.Div("How to Read", style=side_label),
+        html.P(
+            "Visibility % = brand mentions ÷ total LLM queries × 100. "
+            "Position 1 = brand named first in the response.",
+            style={"fontSize": "11px", "color": "#94A3B8",
+                   "lineHeight": "1.6", "margin": "0"},
+        ),
+
+    ], style={
+        "width": "230px",
+        "flexShrink": "0",
+        "background": "white",
+        "border": "1px solid #E2E8F0",
+        "borderRadius": "12px",
+        "padding": "0 18px 20px",
+        "position": "sticky",
+        "top": "24px",
+        "alignSelf": "flex-start",
+        "boxShadow": "0 1px 3px rgba(0,0,0,0.07)",
+        "maxHeight": "calc(100vh - 120px)",
+        "overflowY": "auto",
+    })
+
+
 # ── app builder ────────────────────────────────────────────────────────────────
 
 def build_dash_app(brands=None, target_brand=None):
     """
     Build interactive Dash app.
-    brands / target_brand are kept for backward compatibility but are ignored;
-    brand list is loaded dynamically from the database.
+    brands / target_brand are kept for backward compatibility.
+    Brand list is loaded dynamically from the database, grouped by category.
     """
     from dash import Dash, dcc, html, Input, Output
 
-    all_brands = list_tracked_brands()
-    if not all_brands:
-        all_brands = brands or []
-    default = target_brand if target_brand in all_brands else (all_brands[0] if all_brands else None)
+    # ── load category → brand mapping ─────────────────────────────────
+    all_brands_by_cat = brands_by_category()
+    if not all_brands_by_cat:
+        # fallback: compute from BATCH_PROMPTS if DB prompts table is empty
+        from collections import defaultdict
+        from data.prompts_batch import BATCH_PROMPTS
+        mapping: dict = defaultdict(set)
+        for p in BATCH_PROMPTS:
+            mapping[p.category].update(p.target_brands)
+        all_brands_by_cat = {k: sorted(v) for k, v in sorted(mapping.items())}
+
+    all_cats = sorted(all_brands_by_cat.keys())
+
+    # pick default category — prefer the one containing target_brand
+    default_cat = all_cats[0] if all_cats else None
+    if target_brand:
+        for cat, blist in all_brands_by_cat.items():
+            if target_brand in blist:
+                default_cat = cat
+                break
+
+    initial_brands = all_brands_by_cat.get(default_cat, [])
+    default_brand = (
+        target_brand if target_brand in initial_brands
+        else (initial_brands[0] if initial_brands else None)
+    )
+
+    cat_options = [
+        {"label": CAT_LABELS.get(c, c.replace("_", " ").title()), "value": c}
+        for c in all_cats
+    ]
+    brand_options = [{"label": b, "value": b} for b in initial_brands]
 
     app = Dash(__name__)
+    sidebar = _build_sidebar(_sidebar_stats())
 
     app.layout = html.Div([
 
@@ -252,57 +427,146 @@ def build_dash_app(brands=None, target_brand=None):
             html.H1("AI Brand Visibility Tracker",
                     style={"margin": "0", "fontSize": "22px", "fontWeight": "700",
                            "color": "#0F172A"}),
-            html.P("Track your brand in LLM-generated answers  ·  OpenAI  ·  Anthropic  ·  Gemini",
-                   style={"margin": "4px 0 0", "color": "#64748B", "fontSize": "13px"}),
+            html.P(
+                "Track your brand in LLM-generated answers  ·  OpenAI  ·  Anthropic  ·  Gemini",
+                style={"margin": "4px 0 0", "color": "#64748B", "fontSize": "13px"},
+            ),
         ], style={"padding": "24px 32px 16px", "borderBottom": "1px solid #E2E8F0",
                   "background": "white"}),
 
+        # ── body: sidebar + main ──────────────────────────────────────
         html.Div([
 
-            # ── brand selector ────────────────────────────────────────
-            html.Div([
-                html.Label("Select Brand",
-                           style={"fontSize": "12px", "fontWeight": "600", "color": "#475569"}),
-                dcc.Dropdown(
-                    id="brand-selector",
-                    options=[{"label": b, "value": b} for b in all_brands],
-                    value=default,
-                    clearable=False,
-                    style={"marginTop": "6px", "width": "300px"},
-                ),
-            ], style={"marginTop": "24px"}),
-
-            # ── KPI cards ─────────────────────────────────────────────
-            html.Div(id="kpi-cards",
-                     style={"display": "flex", "gap": "14px", "flexWrap": "wrap",
-                            "marginTop": "20px"}),
-
-            # ── section: competitive context ─────────────────────────
-            html.P("Competitive Context — All Brands", style=SECTION_LABEL),
-            html.Div([
-                dcc.Graph(id="visibility-chart"),
-                dcc.Graph(id="sentiment-chart"),
-            ], style=GRID2),
-
-            # ── section: brand deep-dive ──────────────────────────────
-            html.P(id="deep-dive-label", style=SECTION_LABEL),
-            html.Div([
-                dcc.Graph(id="position-trend-chart"),
-                dcc.Graph(id="competitor-gap-chart"),
-            ], style=GRID2),
+            sidebar,
 
             html.Div([
-                dcc.Graph(id="provider-chart"),
-                dcc.Graph(id="opportunity-chart"),
-            ], style={**GRID2, "marginBottom": "48px"}),
 
-        ], style={"padding": "0 32px"}),
+                # ── category + brand selectors (side by side) ─────────
+                html.Div([
+                    html.Div([
+                        html.Label("Category",
+                                   style={"fontSize": "12px", "fontWeight": "600",
+                                          "color": "#475569"}),
+                        dcc.Dropdown(
+                            id="category-selector",
+                            options=cat_options,
+                            value=default_cat,
+                            clearable=False,
+                            style={"marginTop": "6px", "width": "220px"},
+                        ),
+                    ]),
+                    html.Div([
+                        html.Label("Brand",
+                                   style={"fontSize": "12px", "fontWeight": "600",
+                                          "color": "#475569"}),
+                        dcc.Dropdown(
+                            id="brand-selector",
+                            options=brand_options,
+                            value=default_brand,
+                            clearable=False,
+                            style={"marginTop": "6px", "width": "260px"},
+                        ),
+                    ]),
+                ], style={"display": "flex", "gap": "20px",
+                          "alignItems": "flex-end", "marginTop": "4px"}),
 
-    ], style={"maxWidth": "1400px", "margin": "0 auto",
+                # ── KPI cards ─────────────────────────────────────────
+                html.Div(id="kpi-cards",
+                         style={"display": "flex", "gap": "14px", "flexWrap": "wrap",
+                                "marginTop": "20px"}),
+
+                # ── sample prompts for selected category ──────────────
+                html.Div(id="prompt-examples"),
+
+                # ── section: competitive context ──────────────────────
+                html.P("Competitive Context — All Brands", style=SECTION_LABEL),
+                html.Div([
+                    dcc.Graph(id="visibility-chart"),
+                    dcc.Graph(id="sentiment-chart"),
+                ], style=GRID2),
+
+                # ── section: brand deep-dive ──────────────────────────
+                html.P(id="deep-dive-label", style=SECTION_LABEL),
+                html.Div([
+                    dcc.Graph(id="position-trend-chart"),
+                    dcc.Graph(id="competitor-gap-chart"),
+                ], style=GRID2),
+
+                html.Div([
+                    dcc.Graph(id="provider-chart"),
+                    dcc.Graph(id="opportunity-chart"),
+                ], style={**GRID2, "marginBottom": "48px"}),
+
+            ], style={"flex": "1", "minWidth": "0"}),
+
+        ], style={"display": "flex", "gap": "24px",
+                  "padding": "24px 32px", "alignItems": "flex-start"}),
+
+    ], style={"maxWidth": "1500px", "margin": "0 auto",
               "fontFamily": "Inter, -apple-system, sans-serif",
               "background": BG, "minHeight": "100vh"})
 
-    # ── single callback updates everything ────────────────────────────
+    # ── callback 1: category → brand options ──────────────────────────
+    @app.callback(
+        [Output("brand-selector", "options"),
+         Output("brand-selector", "value")],
+        Input("category-selector", "value"),
+    )
+    def update_brand_options(category):
+        blist = all_brands_by_cat.get(category, [])
+        opts = [{"label": b, "value": b} for b in blist]
+        return opts, (blist[0] if blist else None)
+
+    # ── callback 2: category → sidebar Data Volume stats ─────────────
+    @app.callback(
+        [Output("sb-mentions",  "children"),
+         Output("sb-responses", "children"),
+         Output("sb-brands",    "children"),
+         Output("sb-dates",     "children")],
+        Input("category-selector", "value"),
+    )
+    def update_sidebar_stats(category):
+        if not category:
+            return "—", "—", "—", "—"
+        s = category_stats(category)
+        date_str = (
+            f"{s['d0'][:7]} → {s['d1'][:7]}" if s["d0"] != "—" else "—"
+        )
+        return f"{s['mentions']:,}", f"{s['responses']:,}", str(s["brands"]), date_str
+
+    # ── callback 3: category → sample prompts ─────────────────────────
+    @app.callback(
+        Output("prompt-examples", "children"),
+        Input("category-selector", "value"),
+    )
+    def update_prompt_examples(category):
+        if not category:
+            return []
+        texts = prompts_by_category(category, limit=4)
+        if not texts:
+            return []
+        label = CAT_LABELS.get(category, category.replace("_", " ").title())
+        items = [
+            html.Li(t, style={"fontSize": "13px", "color": "#475569",
+                               "marginBottom": "8px", "lineHeight": "1.6"})
+            for t in texts
+        ]
+        return html.Div([
+            html.P(f"Sample Prompts — {label}", style=SECTION_LABEL),
+            html.Div(
+                html.Ul(items, style={"margin": "0", "paddingLeft": "20px"}),
+                style={
+                    "background": "white",
+                    "border": "1px solid #E2E8F0",
+                    "borderLeft": f"3px solid {ACCENT}",
+                    "borderRadius": "8px",
+                    "padding": "14px 18px",
+                    "boxShadow": "0 1px 3px rgba(0,0,0,0.06)",
+                },
+            ),
+        ])
+
+    # ── callback 4: brand + category → KPIs + 6 charts ───────────────
     @app.callback(
         [Output("kpi-cards",            "children"),
          Output("visibility-chart",     "figure"),
@@ -312,34 +576,43 @@ def build_dash_app(brands=None, target_brand=None):
          Output("provider-chart",       "figure"),
          Output("opportunity-chart",    "figure"),
          Output("deep-dive-label",      "children")],
-        Input("brand-selector", "value"),
+        [Input("brand-selector",    "value"),
+         Input("category-selector", "value")],
     )
-    def update_all(brand):
-        if not brand:
+    def update_all(brand, category):
+        if not brand or not category:
             empty = _empty_fig()
             return [], empty, empty, empty, empty, empty, empty, ""
 
-        df_all = visibility_summary()
-        row = df_all[df_all["brand"] == brand]
+        cat_brands = all_brands_by_cat.get(category, [])
 
-        if not row.empty:
-            r = row.iloc[0]
+        # All metrics scoped to this category's brands only
+        df_all = visibility_summary_by_category(category, cat_brands)
+        row_data = df_all[df_all["brand"] == brand]
+
+        if not row_data.empty:
+            r = row_data.iloc[0]
+            total_cat = df_all["mentions"].sum()
+            pct = r["mentions"] / total_cat * 100 if total_cat > 0 else 0
             kpis = [
-                _kpi_card("Mentions",      str(int(r["mentions"])),       ACCENT),
-                _kpi_card("Visibility %",  f"{r['visibility_pct']:.1f}%", "#3B82F6"),
-                _kpi_card("Avg Position",  f"{r['avg_position']:.1f}",    "#8B5CF6"),
-                _kpi_card("Positive Rate", f"{r['pos_rate']:.0f}%",       "#22C55E"),
-                _kpi_card("Negative Rate", f"{r['neg_rate']:.0f}%",       "#EF4444"),
+                _kpi_card("Visibility %",
+                          f"{r['visibility_pct']:.1f}%",          "#3B82F6"),
+                _kpi_card("Avg Position",
+                          f"{r['avg_position']:.1f}",             "#8B5CF6"),
+                _kpi_card("Positive Rate",
+                          f"{r['pos_rate']:.0f}%",                "#22C55E"),
+                _kpi_card("Negative Rate",
+                          f"{r['neg_rate']:.0f}%",                "#EF4444"),
             ]
         else:
             kpis = [_kpi_card("No data", "—")]
 
         return (
             kpis,
-            _visibility_fig(brand, df_all),
+            _visibility_fig(brand, df_all),   # df_all = category brands only
             _sentiment_fig(brand, df_all),
             _position_trend_fig(brand),
-            _competitor_gap_fig(brand),
+            _competitor_gap_fig(brand, category),
             _provider_fig(brand),
             _opportunity_fig(brand),
             f"{brand} — Deep-Dive",
