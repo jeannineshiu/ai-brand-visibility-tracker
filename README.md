@@ -344,7 +344,7 @@ PromptConfig     # prompt_id, prompt_text, category, target_brands
 
 **Target:** `competitor_avg_cooccurrence - brand_cooccurrence` (positive = gap = opportunity)
 
-**Results (trained on 946 brand_mentions, 919 citations, 25 brands):**
+**Results (trained on 1,209 brand_mentions, 1,107 citations, 26 brands):**
 
 | Metric | Value |
 |--------|-------|
@@ -376,11 +376,11 @@ docker run -p 8000:8000 --env-file .env -v $(pwd)/data:/app/data brand-tracker
 
 ## Data Coverage
 
-Trained and validated across 4 SaaS categories:
+Trained and validated across 4 SaaS categories (1,209 brand mentions · 1,107 citation sources · 26 brands):
 
 | Category | Brands Tracked |
 |----------|---------------|
-| Project Management | Asana, Jira, Linear, Monday.com, Notion, ClickUp, Trello |
+| Project Management | Asana, Jira, Linear, Monday.com, Notion, ClickUp, Trello, Basecamp |
 | CRM | HubSpot, Salesforce, Pipedrive, Attio, Zoho CRM, Close |
-| AI Writing Tools | Jasper, Copy.ai, Grammarly, Writer, Writesonic, Notion AI |
-| Developer Tools | GitHub, GitLab, Linear, Jira, Azure DevOps, Shortcut |
+| AI Writing Tools | Jasper, Copy.ai, Grammarly, Writer, Writesonic, Notion AI, Rytr |
+| Developer Tools | GitHub, GitLab, Linear, Jira, Azure DevOps, Shortcut, YouTrack |
