@@ -205,7 +205,7 @@ def _opportunity_fig(brand: str) -> go.Figure:
                 ))
                 fig.update_layout(xaxis=dict(range=[0, 115]))
                 return _base(fig,
-                             f"{brand} — Opportunity Score  (LightGBM · R²=0.80)",
+                             f"{brand} — Opportunity Score  (LightGBM · R²=0.74)",
                              xaxis_title="Score  (0–100)",
                              margin=dict(l=130, r=60, t=50, b=40))
     except Exception:

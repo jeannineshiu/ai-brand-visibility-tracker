@@ -348,8 +348,8 @@ PromptConfig     # prompt_id, prompt_text, category, target_brands
 
 | Metric | Value |
 |--------|-------|
-| R² | 0.80 |
-| MAE | 2.87 |
+| R² | 0.74 |
+| MAE | 3.33 |
 | Top feature | `cooccurrence` |
 
 ---
