@@ -381,6 +381,6 @@ Trained and validated across 4 SaaS categories (1,209 brand mentions · 1,107 ci
 | Category | Brands Tracked |
 |----------|---------------|
 | Project Management | Asana, Jira, Linear, Monday.com, Notion, ClickUp, Trello, Basecamp |
-| CRM | HubSpot, Salesforce, Pipedrive, Attio, Zoho CRM, Close |
+| CRM | HubSpot, Salesforce, Pipedrive, Attio, Zoho CRM, Close, Copper |
 | AI Writing Tools | Jasper, Copy.ai, Grammarly, Writer, Writesonic, Notion AI, Rytr |
 | Developer Tools | GitHub, GitLab, Linear, Jira, Azure DevOps, Shortcut, YouTrack |
