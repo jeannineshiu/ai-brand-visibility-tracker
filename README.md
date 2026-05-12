@@ -96,7 +96,18 @@ Parses LLM responses to extract:
 - **Competitor discovery** — spaCy NER (`extract_entities`) finds ORG entities not in the target brand list, surfacing unknown competitors organically
 
 ### Module 3 — Visibility Metrics
-Persists results to BigQuery (production) or SQLite (local dev) with a unified interface. Computes time-series metrics: visibility %, position trend, sentiment moving average, competitor gap. Visualized with a Plotly Dash dashboard.
+Persists results to BigQuery (production) or SQLite (local dev) with a unified interface. Computes time-series metrics: visibility %, position trend, sentiment moving average, competitor gap. Visualized with an interactive Plotly Dash dashboard.
+
+**Dashboard features:**
+- Category → Brand cascade dropdown — filter all metrics to a specific product category (Project Management / CRM / AI Writing / Developer Tools)
+- 4 KPI cards: Visibility %, Avg Position, Positive Rate, Negative Rate — all scoped to the selected category
+- Sample prompts panel — shows the actual questions sent to LLMs for the selected category
+- Left sidebar — live data volume stats (mentions, responses, brands tracked) updated per category
+- 6 reactive charts: Visibility % ranking, Sentiment breakdown, Position over time, Competitor gap (same-category only), Provider breakdown, LightGBM opportunity score
+
+![Dashboard overview — category selector, KPI cards, sample prompts, and competitive context charts](docs/dashboard_02.png)
+
+![Dashboard deep-dive — position trend, competitor gap, provider breakdown, and opportunity score](docs/dashboard_01.png)
 
 ### Module 4 — Recommendation Engine
 Trains a LightGBM model on citation co-occurrence features to predict opportunity scores per domain type. Served via FastAPI. `/retrain` requires an API key and reloads the model in memory without server restart. Prompts can be added, listed, or deleted without editing any Python files.
