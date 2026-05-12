@@ -14,6 +14,8 @@ RUN pip install --no-cache-dir \
     python -m spacy download en_core_web_sm
 
 COPY src/ ./src/
+COPY data/ ./data/
+COPY run_batch_pipeline.py .
 COPY .env.example .env
 
 ENV PYTHONPATH=/app

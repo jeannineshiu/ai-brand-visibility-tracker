@@ -120,6 +120,17 @@ async def run_pipeline(prompts, dry_run: bool = False, n_runs: int = 1):
         for brand, count in counts.most_common(10):
             console.print(f"  {brand:<20} {count}")
 
+    # Visibility alert check
+    if all_mentions and args.category:
+        console.print("\n[dim]Checking visibility alerts...[/]")
+        try:
+            from src.alerting.notifier import check_and_alert
+            from src.analyzer.brand_detector import extract_brands
+            cat_brands = list({m.brand for m in all_mentions})
+            check_and_alert(args.category, cat_brands)
+        except Exception as e:
+            console.print(f"[yellow]Alert check skipped: {e}[/]")
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Batch pipeline for brand visibility data generation")
