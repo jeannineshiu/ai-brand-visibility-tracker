@@ -6,7 +6,7 @@ A production-grade Python system that monitors how often a brand appears in LLM 
 
 Inspired by tools like [Peec AI](https://peec.ai) — built with real APIs and production infrastructure instead of UI scraping, for portfolio and educational purposes.
 
-**`3 LLMs`** · **`40 prompts`** · **`26 brands`** · **`1,209 mentions`** · **`80 tests`** · **`CI/CD`** · **`Cloud Run + Scheduler`**
+**`3 LLMs`** · **`40 prompts`** · **`27 brands`** · **`1,209 mentions`** · **`85 tests`** · **`CI/CD`** · **`Cloud Run + Scheduler`**
 
 ---
 
@@ -146,7 +146,7 @@ Automated weekly data collection and visibility monitoring:
 | Data | pandas, Pydantic v2 |
 | Alerting | Slack Incoming Webhooks |
 | Infra | Docker, Google Cloud Run, Google Cloud Scheduler |
-| Testing | pytest, pytest-asyncio (80 tests) |
+| Testing | pytest, pytest-asyncio (85 tests) |
 | CI | GitHub Actions |
 
 ---
@@ -409,7 +409,7 @@ PromptConfig     # prompt_id, prompt_text, category, target_brands
 
 **Target:** `competitor_avg_cooccurrence - brand_cooccurrence` (positive = gap = opportunity)
 
-**Results (trained on 1,209 brand_mentions, 1,107 citations, 26 brands):**
+**Results (trained on 1,209 brand_mentions, 1,107 citations, 27 brands):**
 
 | Metric | Value |
 |--------|-------|
@@ -438,7 +438,7 @@ docker run -p 8000:8000 --env-file .env -v $(pwd)/data:/app/data brand-tracker
 
 ## Data Coverage
 
-Trained and validated across 4 SaaS categories (1,209 brand mentions · 1,107 citation sources · 26 brands):
+Trained and validated across 4 SaaS categories (1,209 brand mentions · 1,107 citation sources · 27 brands):
 
 | Category | Brands Tracked |
 |----------|---------------|
