@@ -1,28 +1,31 @@
 # AI Brand Visibility Tracker
 
-A Python system that tracks how often a target brand appears in AI-generated answers across multiple LLMs (OpenAI, Anthropic, Gemini), analyzes sentiment and citation sources, and recommends which content channels to invest in to improve brand visibility.
+> **Track your brand in AI-generated answers — before your competitors do.**
 
-Inspired by tools like [Peec AI](https://peec.ai) — built with real APIs instead of UI scraping for educational and portfolio purposes.
+A production-grade Python system that monitors how often a brand appears in LLM responses across OpenAI, Anthropic, and Gemini, analyzes sentiment and citation sources, trains a LightGBM recommendation model, and delivers automated Slack alerts when visibility drops — all backed by Google BigQuery and scheduled via Cloud Run.
+
+Inspired by tools like [Peec AI](https://peec.ai) — built with real APIs and production infrastructure instead of UI scraping, for portfolio and educational purposes.
+
+**`3 LLMs`** · **`40 prompts`** · **`26 brands`** · **`1,209 mentions`** · **`80 tests`** · **`CI/CD`** · **`Cloud Run + Scheduler`**
 
 ---
 
-## Business Context
+## Why This Exists
 
-### The problem this solves
+ChatGPT, Perplexity, and Gemini are becoming the primary discovery surface for B2B software. When a buyer asks *"What's the best CRM for a Series A startup?"*, the AI's answer directly shapes the shortlist — often without the buyer ever clicking a search result.
 
-ChatGPT, Perplexity, and Gemini are becoming primary discovery surfaces for B2B software. When a potential customer asks *"What's the best CRM for a Series A startup?"*, the AI's answer directly shapes purchasing decisions — often without the customer ever clicking a search result.
+Traditional SEO tools track Google rankings. They are blind to whether your brand is being recommended by AI assistants. This emerging discipline is called **Generative Engine Optimization (GEO)** or **Answer Engine Optimization (AEO)**.
 
-Traditional SEO tools track Google rankings. They have no visibility into whether your brand is being recommended by AI assistants. This emerging discipline is called **Generative Engine Optimization (GEO)** or **Answer Engine Optimization (AEO)**.
+### What this system answers
 
-### What this tool enables
-
-| Business Question | What This System Answers |
+| Business Question | How the System Answers It |
 |---|---|
-| Is my brand being mentioned at all? | Visibility % across 3 LLMs, 40 prompts |
-| How am I doing vs competitors? | Competitor gap: who appears when you don't |
-| Is AI portraying my brand positively? | Sentiment trend (LLM-as-judge, daily moving avg) |
+| Is my brand being mentioned at all? | Visibility % across 3 LLMs, 40 prompts, per category |
+| How do I rank vs competitors? | Competitor gap: who appears in prompts where you don't |
+| Is AI portraying my brand positively? | LLM-as-judge sentiment (positive / neutral / negative) |
 | Which content investments will move the needle? | LightGBM opportunity score per domain type |
-| Which citations are driving competitor mentions? | Citation co-occurrence breakdown |
+| Which citations drive competitor mentions? | Citation co-occurrence breakdown by domain type |
+| Will I know when visibility drops? | Slack alert fires automatically after each scheduled run |
 
 ### Who this is for
 
@@ -67,26 +70,34 @@ flowchart TD
     end
 
     G1 --> H
+    G1 --> N
 
     subgraph M4["Module 4 — Recommendation Engine"]
         H[feature_engineer.py\nco-occurrence features]
-        H --> I1[LightGBM\nR²=0.80]
+        H --> I1[LightGBM\nR²=0.74]
         H --> I2[Rule-based scorer\nfallback]
         I1 & I2 --> J[FastAPI :8000\n/recommendations\n/retrain 🔒\n/visibility\n/prompts]
+    end
+
+    subgraph M5["Module 5 — Alerting & Scheduling"]
+        N[notifier.py\nSlack webhook]
+        O[Cloud Scheduler\nweekly cron] --> P2[Cloud Run Job\nrun_batch_pipeline.py]
+        P2 --> N
     end
 
     style M1 fill:#dbeafe,stroke:#3b82f6
     style M2 fill:#dcfce7,stroke:#22c55e
     style M3 fill:#fef9c3,stroke:#eab308
     style M4 fill:#fce7f3,stroke:#ec4899
+    style M5 fill:#ede9fe,stroke:#8b5cf6
 ```
 
 ### Module 1 — Prompt Runner
-Queries multiple LLM APIs concurrently using `asyncio.gather`. Supports OpenAI, Anthropic, and Gemini. Automatically falls back to a `MockClient` when an API key is missing or invalid.
+Queries multiple LLM APIs concurrently using `asyncio.gather`. Supports OpenAI, Anthropic, and Gemini. Automatically falls back to a `MockClient` when an API key is missing or invalid — no code changes required.
 
-Includes **majority voting** (`vote.py`): run each prompt N times and keep only brands that appear in more than half the trials. Eliminates false positives caused by LLM non-determinism.
+Includes **majority voting** (`vote.py`): run each prompt N times and keep only brands that appear in more than half the trials, eliminating false positives caused by LLM non-determinism.
 
-Prompts are managed dynamically — stored in SQLite/BigQuery and editable via the API (`POST /prompts`). The 40 built-in prompts seed the database automatically on first run.
+Prompts are managed dynamically — stored in SQLite/BigQuery and editable via the REST API (`POST /prompts`). The 40 built-in prompts seed the database automatically on first run.
 
 ### Module 2 — Brand & Source Analyzer
 Parses LLM responses to extract:
@@ -95,22 +106,29 @@ Parses LLM responses to extract:
 - **Citation sources** — URLs extracted via regex, classified into 10 domain types (review_site, tech_media, community, developer, etc.)
 - **Competitor discovery** — spaCy NER (`extract_entities`) finds ORG entities not in the target brand list, surfacing unknown competitors organically
 
-### Module 3 — Visibility Metrics
-Persists results to BigQuery (production) or SQLite (local dev) with a unified interface. Computes time-series metrics: visibility %, position trend, sentiment moving average, competitor gap. Visualized with an interactive Plotly Dash dashboard.
+### Module 3 — Visibility Metrics & Dashboard
+Persists results to BigQuery (production) or SQLite (local dev) with a unified storage interface. Computes time-series metrics: visibility %, position trend, sentiment moving average, competitor gap.
 
 **Dashboard features:**
-- Category → Brand cascade dropdown — filter all metrics to a specific product category (Project Management / CRM / AI Writing / Developer Tools)
-- 4 KPI cards: Visibility %, Avg Position, Positive Rate, Negative Rate — all scoped to the selected category
+- Category → Brand cascade dropdown — all metrics scoped to the selected product category
+- 4 KPI cards: Visibility %, Avg Position, Positive Rate, Negative Rate
 - Sample prompts panel — shows the actual questions sent to LLMs for the selected category
-- Left sidebar — live data volume stats (mentions, responses, brands tracked) updated per category
-- 6 reactive charts: Visibility % ranking, Sentiment breakdown, Position over time, Competitor gap (same-category only), Provider breakdown, LightGBM opportunity score
+- Left sidebar — live data volume stats updated per category
+- 6 reactive charts: Visibility % ranking, Sentiment breakdown, Position over time, Competitor gap (same-category brands only), Provider breakdown, LightGBM opportunity score
 
 ![Dashboard overview — category selector, KPI cards, sample prompts, and competitive context charts](docs/dashboard_02.png)
 
 ![Dashboard deep-dive — position trend, competitor gap, provider breakdown, and opportunity score](docs/dashboard_01.png)
 
 ### Module 4 — Recommendation Engine
-Trains a LightGBM model on citation co-occurrence features to predict opportunity scores per domain type. Served via FastAPI. `/retrain` requires an API key and reloads the model in memory without server restart. Prompts can be added, listed, or deleted without editing any Python files.
+Trains a LightGBM model on citation co-occurrence features to predict which content channel (review site, tech media, community, etc.) will most improve visibility vs competitors. Served via FastAPI with hot-reload retraining — `POST /retrain` reloads the model in memory without server restart. Prompts can be added, listed, or deleted via the API without editing any Python files.
+
+### Module 5 — Alerting & Scheduling
+Automated weekly data collection and visibility monitoring:
+- **Cloud Scheduler** triggers a **Cloud Run Job** on a weekly cron schedule
+- The job runs `run_batch_pipeline.py --category <target>` against all 3 LLM APIs
+- After saving, `notifier.py` queries the latest visibility figures and fires a **Slack webhook alert** if any brand falls below the configured threshold or drops more than a defined number of percentage points vs the previous run
+- Fully configurable via `.env`: `VISIBILITY_ALERT_THRESHOLD`, `VISIBILITY_DROP_ALERT`, `SLACK_WEBHOOK_URL`
 
 ---
 
@@ -119,16 +137,17 @@ Trains a LightGBM model on citation co-occurrence features to predict opportunit
 | Layer | Technologies |
 |-------|-------------|
 | LLM APIs | OpenAI API, Anthropic API, Google Gemini API |
-| Concurrency | `asyncio`, `tenacity` (retry) |
+| Concurrency | `asyncio`, `tenacity` (retry with backoff) |
 | NLP | spaCy NER (`en_core_web_sm`), LLM-as-judge (gpt-4o-mini) |
 | ML | LightGBM, scikit-learn |
-| Storage | Google BigQuery, SQLite |
+| Storage | Google BigQuery, SQLite (auto-fallback) |
 | Visualization | Plotly Dash |
 | API | FastAPI, Uvicorn |
 | Data | pandas, Pydantic v2 |
-| Testing | pytest, pytest-asyncio |
+| Alerting | Slack Incoming Webhooks |
+| Infra | Docker, Google Cloud Run, Google Cloud Scheduler |
+| Testing | pytest, pytest-asyncio (80 tests) |
 | CI | GitHub Actions |
-| Infra | Docker, python-dotenv |
 
 ---
 
@@ -138,30 +157,32 @@ Trains a LightGBM model on citation co-occurrence features to predict opportunit
 ai-brand-visibility-tracker/
 ├── src/
 │   ├── prompt_runner/
-│   │   ├── llm_clients.py      # OpenAI / Anthropic / Gemini / Mock clients
-│   │   └── runner.py           # asyncio concurrent query engine (n_runs support)
+│   │   ├── llm_clients.py        # OpenAI / Anthropic / Gemini / Mock clients
+│   │   └── runner.py             # asyncio concurrent query engine (n_runs support)
 │   ├── analyzer/
-│   │   ├── brand_detector.py   # regex + spaCy NER brand matching + entity discovery
-│   │   ├── sentiment_judge.py  # LLM-as-judge sentiment scoring
+│   │   ├── brand_detector.py     # regex + spaCy NER brand matching + entity discovery
+│   │   ├── sentiment_judge.py    # LLM-as-judge sentiment scoring
 │   │   ├── citation_extractor.py # URL extraction + 10-type domain classification
-│   │   ├── vote.py             # majority voting across N trials
-│   │   └── pipeline.py         # orchestrates all analyzer steps, returns discovered competitors
+│   │   ├── vote.py               # majority voting across N trials
+│   │   └── pipeline.py           # orchestrates analyzer steps, returns discovered competitors
 │   ├── metrics/
-│   │   ├── calculator.py       # visibility %, position trend, competitor gap
-│   │   └── dashboard.py        # Plotly Dash 4-chart dashboard
+│   │   ├── calculator.py         # visibility %, position trend, competitor gap (category-scoped)
+│   │   └── dashboard.py          # Plotly Dash interactive dashboard
 │   ├── storage/
-│   │   ├── store.py            # unified interface (auto-routes BQ vs SQLite) + seed_prompts
-│   │   ├── bigquery_store.py   # BigQuery backend (responses, mentions, citations, prompts)
-│   │   ├── sqlite_store.py     # SQLite backend
-│   │   └── schema.py           # shared DDL / BQ schema (4 tables)
+│   │   ├── store.py              # unified interface (auto-routes BigQuery vs SQLite)
+│   │   ├── bigquery_store.py     # BigQuery backend
+│   │   ├── sqlite_store.py       # SQLite backend
+│   │   └── schema.py             # shared DDL / BQ schema (4 tables)
 │   ├── recommender/
-│   │   ├── feature_engineer.py # builds feature matrix from stored data
-│   │   ├── scorer.py           # rule-based opportunity scorer (fallback)
-│   │   ├── train_lgbm.py       # LightGBM training + inference + model persistence
-│   │   └── api.py              # FastAPI endpoints (recommendations, metrics, prompts)
+│   │   ├── feature_engineer.py   # builds feature matrix from stored data
+│   │   ├── scorer.py             # rule-based opportunity scorer (fallback)
+│   │   ├── train_lgbm.py         # LightGBM training + inference + model persistence
+│   │   └── api.py                # FastAPI endpoints (recommendations, metrics, prompts)
+│   ├── alerting/
+│   │   └── notifier.py           # Slack webhook alert on visibility drop
 │   └── utils/
-│       ├── config.py           # env vars + paths
-│       └── models.py           # Pydantic data models
+│       ├── config.py             # env vars + paths
+│       └── models.py             # Pydantic data models
 ├── tests/
 │   ├── test_brand_detector.py     # 13 tests: regex, word boundary, position order
 │   ├── test_citation_extractor.py # 16 tests: domain classification, URL parsing
@@ -171,16 +192,17 @@ ai-brand-visibility-tracker/
 │   ├── test_retrain_auth.py       #  4 tests: API key auth on /retrain
 │   └── test_vote.py               # 10 tests: majority voting logic
 ├── data/
-│   ├── prompts_batch.py        # 40 built-in prompts (seeded to DB on first run)
-│   └── raw/                    # raw LLM response JSONs (gitignored)
-├── demo_module1.py             # run LLM queries
-├── demo_module2.py             # analyze latest run
-├── demo_module3.py             # save to DB + launch dashboard
-├── demo_module4.py             # launch FastAPI
-├── demo_lgbm.py                # train LightGBM + show results
-├── run_batch_pipeline.py       # batch data generation (prompts × 3 LLMs)
-├── pytest.ini
+│   ├── prompts_batch.py           # 40 built-in prompts (seeded to DB on first run)
+│   └── raw/                       # raw LLM response JSONs (gitignored)
+├── docs/                          # dashboard screenshots
+├── demo_module1.py                # run LLM queries
+├── demo_module2.py                # analyze latest run
+├── demo_module3.py                # save to DB + launch dashboard
+├── demo_module4.py                # launch FastAPI
+├── demo_lgbm.py                   # train LightGBM + show results
+├── run_batch_pipeline.py          # batch pipeline (prompts × LLMs → BigQuery → alert)
 ├── Dockerfile
+├── pytest.ini
 └── environment.yml
 ```
 
@@ -228,8 +250,13 @@ GCP_PROJECT_ID=your-project-id
 BIGQUERY_DATASET=brand_tracker
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 
-# Required to call POST /retrain — set a strong random string
+# Required to call POST /retrain
 RETRAIN_API_KEY=your-secret-key
+
+# Optional — Slack alerts when visibility drops
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+VISIBILITY_ALERT_THRESHOLD=15.0
+VISIBILITY_DROP_ALERT=5.0
 ```
 
 ### 3. (Optional) GCP / BigQuery setup
@@ -259,7 +286,7 @@ python demo_module3.py
 python demo_module4.py
 ```
 
-### Generate training data (for LightGBM)
+### Batch data collection
 
 ```bash
 # Dry run — preview prompts without API calls
@@ -268,7 +295,7 @@ python run_batch_pipeline.py --dry-run
 # Run all prompts × 3 LLMs (~$0.08, ~5-10 min)
 python run_batch_pipeline.py
 
-# Run one category only (cheaper test)
+# Run one category only (cheaper, ~$0.01)
 python run_batch_pipeline.py --category crm
 
 # Run with majority voting — 3 trials per prompt for stable brand detection
@@ -292,7 +319,7 @@ pytest -v
 Once `demo_module4.py` is running:
 
 ```bash
-# Get recommendations (uses LightGBM if model exists, falls back to rule-based)
+# Get recommendations (LightGBM if model exists, falls back to rule-based)
 curl -X POST http://localhost:8000/recommendations \
   -H "Content-Type: application/json" \
   -d '{"target_brand": "Asana", "competitors": ["Jira", "Linear", "Monday.com"], "top_n": 5}'
@@ -307,7 +334,7 @@ curl http://localhost:8000/competitor-gap/Asana
 curl -X POST http://localhost:8000/retrain \
   -H "X-API-Key: your-secret-key"
 
-# Prompt management (no auth required)
+# Prompt management
 curl http://localhost:8000/prompts
 curl -X POST http://localhost:8000/prompts \
   -H "Content-Type: application/json" \
@@ -316,6 +343,44 @@ curl -X DELETE http://localhost:8000/prompts/pm_b01
 ```
 
 Interactive API docs: `http://localhost:8000/docs`
+
+---
+
+## Infrastructure — Cloud Run + Scheduler
+
+The pipeline runs on a weekly schedule via Google Cloud:
+
+```
+Cloud Scheduler (cron: 0 9 * * 1, Asia/Taipei)
+  → Cloud Run Job (brand-tracker-pipeline)
+    → run_batch_pipeline.py --category <target>
+      → LLM APIs → BigQuery
+      → notifier.py → Slack alert (if visibility drops)
+```
+
+```bash
+# Deploy Docker image (amd64)
+docker build --platform linux/amd64 --provenance=false \
+  -t us-central1-docker.pkg.dev/$PROJECT_ID/brand-tracker/pipeline:latest .
+docker push us-central1-docker.pkg.dev/$PROJECT_ID/brand-tracker/pipeline:latest
+
+# Create Cloud Run Job
+gcloud run jobs create brand-tracker-pipeline \
+  --image us-central1-docker.pkg.dev/$PROJECT_ID/brand-tracker/pipeline:latest \
+  --region us-central1 \
+  --args "run_batch_pipeline.py,--category,crm" \
+  --set-secrets OPENAI_API_KEY=OPENAI_API_KEY:latest \
+  --set-env-vars GCP_PROJECT_ID=$PROJECT_ID,BIGQUERY_DATASET=brand_tracker \
+  --service-account brand-tracker-sa@$PROJECT_ID.iam.gserviceaccount.com
+
+# Schedule weekly run
+gcloud scheduler jobs create http brand-tracker-weekly \
+  --schedule "0 9 * * 1" \
+  --uri "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_ID/jobs/brand-tracker-pipeline:run" \
+  --oauth-service-account-email brand-tracker-sa@$PROJECT_ID.iam.gserviceaccount.com \
+  --time-zone "Asia/Taipei" \
+  --location us-central1
+```
 
 ---
 
@@ -332,7 +397,7 @@ PromptConfig     # prompt_id, prompt_text, category, target_brands
 
 ## ML Model
 
-**Problem:** Given a (brand, domain_type) pair, predict opportunity score = how much investing in this source type will improve brand visibility vs competitors.
+**Problem:** Given a (brand, domain_type) pair, predict opportunity score = how much investing in this content channel will improve brand visibility vs competitors.
 
 **Features:**
 - `cooccurrence` — how often brand appears in prompts citing this domain type
@@ -360,17 +425,14 @@ PromptConfig     # prompt_id, prompt_text, category, target_brands
 # Build
 docker build -t brand-tracker .
 
-# Train model locally first (if not already done)
+# Train model locally first
 python demo_lgbm.py
 
-# Run API server — mount ./data so the container can read the trained model and SQLite DB
+# Run API server
 docker run -p 8000:8000 --env-file .env -v $(pwd)/data:/app/data brand-tracker
 ```
 
-> **How the model gets loaded:**
-> On startup the API tries to load `data/lgbm_opportunity_model.pkl` from the mounted volume.
-> If no model file is found (e.g. fresh deployment with BigQuery), it attempts to auto-train from
-> available data. If neither is possible it falls back to rule-based scoring.
+> On startup the API loads `data/lgbm_opportunity_model.pkl` from the mounted volume. If not found, it auto-trains from available BigQuery data. If neither is possible, it falls back to rule-based scoring.
 
 ---
 
