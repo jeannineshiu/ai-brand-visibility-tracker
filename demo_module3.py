@@ -76,7 +76,7 @@ async def main():
     port = find_free_port(8050)
     print(f"\nLaunching dashboard at http://localhost:{port} ...")
     from src.metrics.dashboard import build_dash_app
-    app = build_dash_app(BRANDS, TARGET_BRAND)
+    app = build_dash_app(TARGET_BRAND)
     app.run(debug=False, port=port)
 
 

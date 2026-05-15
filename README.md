@@ -109,7 +109,7 @@ Parses LLM responses to extract:
 ### Module 3 — Visibility Metrics & Dashboard
 Persists results to BigQuery (production) or SQLite (local dev) with a unified storage interface. Computes time-series metrics: visibility %, position trend, sentiment moving average, competitor gap.
 
-**Dashboard features:**
+**Tab 1 — Brand Dashboard:**
 - Category → Brand cascade dropdown — all metrics scoped to the selected product category
 - 4 KPI cards: Visibility %, Avg Position, Positive Rate, Negative Rate
 - Sample prompts panel — shows the actual questions sent to LLMs for the selected category
@@ -119,6 +119,14 @@ Persists results to BigQuery (production) or SQLite (local dev) with a unified s
 ![Dashboard overview — category selector, KPI cards, sample prompts, and competitive context charts](docs/dashboard_02.png)
 
 ![Dashboard deep-dive — position trend, competitor gap, provider breakdown, and opportunity score](docs/dashboard_01.png)
+
+**Tab 2 — LLM Behavior Analysis:**
+- Cross-LLM visibility disagreement — same prompts, how differently do OpenAI, Anthropic, and Gemini rank each brand?
+- Citation source preferences by LLM — which types of sources (review sites, tech media, community, etc.) does each LLM tend to cite?
+
+![LLM Behavior Analysis — cross-LLM visibility disagreement by brand](docs/llm_behavior_01.png)
+
+![LLM Behavior Analysis — citation source mix by LLM provider](docs/llm_behavior_02.png)
 
 ### Module 4 — Recommendation Engine
 Trains a LightGBM model on citation co-occurrence features to predict which content channel (review site, tech media, community, etc.) will most improve visibility vs competitors. Served via FastAPI with hot-reload retraining — `POST /retrain` reloads the model in memory without server restart. Prompts can be added, listed, or deleted via the API without editing any Python files.

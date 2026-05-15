@@ -7,6 +7,7 @@ from src.metrics.calculator import (
     visibility_summary_by_category, position_trend, competitor_gap,
     provider_breakdown, _tbl,
     brands_by_category, prompts_by_category, category_stats,
+    llm_disagreement, citation_by_provider,
 )
 from src.storage.store import query_df
 
@@ -239,6 +240,78 @@ def _opportunity_fig(brand: str) -> go.Figure:
     return _empty_fig("Opportunity data unavailable")
 
 
+def _llm_disagreement_fig(category: str) -> go.Figure:
+    df = llm_disagreement(category)
+    if df.empty:
+        return _empty_fig("No data for this category")
+    provider_colors = {"openai": "#3B82F6", "anthropic": "#F97316", "gemini": "#8B5CF6"}
+    provider_labels = {
+        "openai":    "OpenAI (GPT-4o-mini)",
+        "anthropic": "Anthropic (Claude Haiku)",
+        "gemini":    "Gemini (2.5 Flash)",
+    }
+    fig = go.Figure()
+    for prov in ["openai", "anthropic", "gemini"]:
+        if prov not in df.columns:
+            continue
+        fig.add_trace(go.Bar(
+            name=provider_labels[prov],
+            y=df["brand"],
+            x=df[prov],
+            orientation="h",
+            marker_color=provider_colors[prov],
+            text=[f"{v:.1f}%" if v > 0 else "" for v in df[prov]],
+            textposition="outside",
+        ))
+    fig.update_layout(barmode="group")
+    return _base(
+        fig, "Brand Visibility % — Cross-LLM Comparison",
+        height=max(340, len(df) * 70),
+        xaxis_title="Visibility %", yaxis_title="",
+        margin=dict(l=130, r=80, t=50, b=40),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+
+
+def _citation_by_provider_fig(category: str | None = None) -> go.Figure:
+    df = citation_by_provider(category)
+    if df.empty:
+        return _empty_fig("No citation data")
+    df = df.copy()
+    totals = df.groupby("provider")["count"].transform("sum")
+    df["pct"] = (df["count"] / totals * 100).round(1)
+    df["provider_label"] = df["provider"].replace(
+        {"openai": "OpenAI", "anthropic": "Anthropic", "gemini": "Gemini"}
+    )
+    domain_colors = {
+        "review_site":   "#4ADE80", "tech_media":    "#3B82F6",
+        "community":     "#F97316", "official_docs": "#8B5CF6",
+        "developer":     "#EC4899", "social_media":  "#EAB308",
+        "academic":      "#14B8A6", "news":          "#64748B",
+        "brand":         "#CBD5E1", "other":         "#94A3B8",
+    }
+    df["label"] = df["pct"].apply(lambda x: f"{x:.0f}%" if x >= 5 else "")
+    fig = px.bar(
+        df.sort_values("domain_type"),
+        x="provider_label", y="pct", color="domain_type",
+        barmode="stack",
+        color_discrete_map=domain_colors,
+        category_orders={"provider_label": ["OpenAI", "Anthropic", "Gemini"]},
+        labels={"pct": "% of Citations", "provider_label": "", "domain_type": "Source Type"},
+        text="label",
+    )
+    fig.update_traces(textposition="inside", insidetextanchor="middle")
+    return _base(
+        fig, "Citation Source Mix by LLM  (%)",
+        height=400,
+        xaxis_title="", yaxis_title="% of Citations",
+        margin=dict(l=60, r=40, t=50, b=150),
+        legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="center", x=0.5,
+                    title_text=""),
+        yaxis=dict(range=[0, 105]),
+    )
+
+
 # ── sidebar helpers ────────────────────────────────────────────────────────────
 
 def _sidebar_stats() -> dict:
@@ -376,11 +449,11 @@ def _build_sidebar(stats: dict) -> "html.Div":
 
 # ── app builder ────────────────────────────────────────────────────────────────
 
-def build_dash_app(brands=None, target_brand=None):
+def build_dash_app(target_brand=None):
     """
     Build interactive Dash app.
-    brands / target_brand are kept for backward compatibility.
     Brand list is loaded dynamically from the database, grouped by category.
+    target_brand: if provided, pre-selects this brand on load.
     """
     from dash import Dash, dcc, html, Input, Output
 
@@ -420,6 +493,52 @@ def build_dash_app(brands=None, target_brand=None):
     app = Dash(__name__)
     sidebar = _build_sidebar(_sidebar_stats())
 
+    _tab_style = {
+        "padding": "12px 24px", "fontSize": "13px", "color": "#64748B",
+        "fontWeight": "500", "background": "white", "border": "none",
+        "borderBottom": "3px solid transparent",
+    }
+    _tab_selected = {
+        **_tab_style, "color": "#0F172A", "fontWeight": "700",
+        "borderBottom": f"3px solid {ACCENT}",
+    }
+
+    llm_tab = html.Div([
+        html.P(
+            "Why do ChatGPT, Claude, and Gemini recommend different brands for the same query? "
+            "Explore cross-LLM visibility disagreement and citation source preferences.",
+            style={"fontSize": "13px", "color": "#64748B", "margin": "0 0 20px",
+                   "lineHeight": "1.7"},
+        ),
+        html.Div([
+            html.Label("Category",
+                       style={"fontSize": "12px", "fontWeight": "600", "color": "#475569"}),
+            dcc.Dropdown(
+                id="llm-cat",
+                options=cat_options,
+                value=default_cat,
+                clearable=False,
+                style={"marginTop": "6px", "width": "220px"},
+            ),
+        ], style={"marginBottom": "28px"}),
+
+        html.P("Cross-LLM Visibility Disagreement", style=SECTION_LABEL),
+        html.P(
+            "Same prompts — how differently do the three LLMs rank brands in this category?",
+            style={"fontSize": "12px", "color": "#64748B", "margin": "0 0 12px"},
+        ),
+        dcc.Graph(id="llm-disagreement-chart"),
+
+        html.P("Citation Source Preferences by LLM",
+               style={**SECTION_LABEL, "marginTop": "36px"}),
+        html.P(
+            "Which types of sources does each LLM tend to cite for queries in this category?",
+            style={"fontSize": "12px", "color": "#64748B", "margin": "0 0 12px"},
+        ),
+        dcc.Graph(id="llm-citation-chart"),
+
+    ], style={"padding": "24px 32px", "maxWidth": "1100px"})
+
     app.layout = html.Div([
 
         # ── header ────────────────────────────────────────────────────
@@ -434,73 +553,88 @@ def build_dash_app(brands=None, target_brand=None):
         ], style={"padding": "24px 32px 16px", "borderBottom": "1px solid #E2E8F0",
                   "background": "white"}),
 
-        # ── body: sidebar + main ──────────────────────────────────────
-        html.Div([
+        # ── tabs ──────────────────────────────────────────────────────
+        dcc.Tabs([
 
-            sidebar,
+            dcc.Tab(
+                label="Brand Dashboard",
+                style=_tab_style, selected_style=_tab_selected,
+                children=[html.Div([
 
-            html.Div([
+                    sidebar,
 
-                # ── category + brand selectors (side by side) ─────────
-                html.Div([
                     html.Div([
-                        html.Label("Category",
-                                   style={"fontSize": "12px", "fontWeight": "600",
-                                          "color": "#475569"}),
-                        dcc.Dropdown(
-                            id="category-selector",
-                            options=cat_options,
-                            value=default_cat,
-                            clearable=False,
-                            style={"marginTop": "6px", "width": "220px"},
-                        ),
-                    ]),
-                    html.Div([
-                        html.Label("Brand",
-                                   style={"fontSize": "12px", "fontWeight": "600",
-                                          "color": "#475569"}),
-                        dcc.Dropdown(
-                            id="brand-selector",
-                            options=brand_options,
-                            value=default_brand,
-                            clearable=False,
-                            style={"marginTop": "6px", "width": "260px"},
-                        ),
-                    ]),
-                ], style={"display": "flex", "gap": "20px",
-                          "alignItems": "flex-end", "marginTop": "4px"}),
 
-                # ── KPI cards ─────────────────────────────────────────
-                html.Div(id="kpi-cards",
-                         style={"display": "flex", "gap": "14px", "flexWrap": "wrap",
-                                "marginTop": "20px"}),
+                        # ── category + brand selectors (side by side) ─────────
+                        html.Div([
+                            html.Div([
+                                html.Label("Category",
+                                           style={"fontSize": "12px", "fontWeight": "600",
+                                                  "color": "#475569"}),
+                                dcc.Dropdown(
+                                    id="category-selector",
+                                    options=cat_options,
+                                    value=default_cat,
+                                    clearable=False,
+                                    style={"marginTop": "6px", "width": "220px"},
+                                ),
+                            ]),
+                            html.Div([
+                                html.Label("Brand",
+                                           style={"fontSize": "12px", "fontWeight": "600",
+                                                  "color": "#475569"}),
+                                dcc.Dropdown(
+                                    id="brand-selector",
+                                    options=brand_options,
+                                    value=default_brand,
+                                    clearable=False,
+                                    style={"marginTop": "6px", "width": "260px"},
+                                ),
+                            ]),
+                        ], style={"display": "flex", "gap": "20px",
+                                  "alignItems": "flex-end", "marginTop": "4px"}),
 
-                # ── sample prompts for selected category ──────────────
-                html.Div(id="prompt-examples"),
+                        # ── KPI cards ─────────────────────────────────────────
+                        html.Div(id="kpi-cards",
+                                 style={"display": "flex", "gap": "14px", "flexWrap": "wrap",
+                                        "marginTop": "20px"}),
 
-                # ── section: competitive context ──────────────────────
-                html.P("Competitive Context — All Brands", style=SECTION_LABEL),
-                html.Div([
-                    dcc.Graph(id="visibility-chart"),
-                    dcc.Graph(id="sentiment-chart"),
-                ], style=GRID2),
+                        # ── sample prompts for selected category ──────────────
+                        html.Div(id="prompt-examples"),
 
-                # ── section: brand deep-dive ──────────────────────────
-                html.P(id="deep-dive-label", style=SECTION_LABEL),
-                html.Div([
-                    dcc.Graph(id="position-trend-chart"),
-                    dcc.Graph(id="competitor-gap-chart"),
-                ], style=GRID2),
+                        # ── section: competitive context ──────────────────────
+                        html.P("Competitive Context — All Brands", style=SECTION_LABEL),
+                        html.Div([
+                            dcc.Graph(id="visibility-chart"),
+                            dcc.Graph(id="sentiment-chart"),
+                        ], style=GRID2),
 
-                html.Div([
-                    dcc.Graph(id="provider-chart"),
-                    dcc.Graph(id="opportunity-chart"),
-                ], style={**GRID2, "marginBottom": "48px"}),
+                        # ── section: brand deep-dive ──────────────────────────
+                        html.P(id="deep-dive-label", style=SECTION_LABEL),
+                        html.Div([
+                            dcc.Graph(id="position-trend-chart"),
+                            dcc.Graph(id="competitor-gap-chart"),
+                        ], style=GRID2),
 
-            ], style={"flex": "1", "minWidth": "0"}),
+                        html.Div([
+                            dcc.Graph(id="provider-chart"),
+                            dcc.Graph(id="opportunity-chart"),
+                        ], style={**GRID2, "marginBottom": "48px"}),
 
-        ], style={"display": "flex", "gap": "24px",
-                  "padding": "24px 32px", "alignItems": "flex-start"}),
+                    ], style={"flex": "1", "minWidth": "0"}),
+
+                ], style={"display": "flex", "gap": "24px",
+                          "padding": "24px 32px", "alignItems": "flex-start"})],
+            ),
+
+            dcc.Tab(
+                label="LLM Behavior Analysis",
+                style=_tab_style, selected_style=_tab_selected,
+                children=[llm_tab],
+            ),
+
+        ], style={"background": "white", "borderBottom": "1px solid #E2E8F0",
+                  "padding": "0 8px"}),
 
     ], style={"maxWidth": "1500px", "margin": "0 auto",
               "fontFamily": "Inter, -apple-system, sans-serif",
@@ -592,8 +726,6 @@ def build_dash_app(brands=None, target_brand=None):
 
         if not row_data.empty:
             r = row_data.iloc[0]
-            total_cat = df_all["mentions"].sum()
-            pct = r["mentions"] / total_cat * 100 if total_cat > 0 else 0
             kpis = [
                 _kpi_card("Visibility %",
                           f"{r['visibility_pct']:.1f}%",          "#3B82F6"),
@@ -617,5 +749,25 @@ def build_dash_app(brands=None, target_brand=None):
             _opportunity_fig(brand),
             f"{brand} — Deep-Dive",
         )
+
+    # ── callback 5: llm-cat → cross-LLM disagreement chart ───────────
+    @app.callback(
+        Output("llm-disagreement-chart", "figure"),
+        Input("llm-cat", "value"),
+    )
+    def update_llm_disagreement(category):
+        if not category:
+            return _empty_fig()
+        return _llm_disagreement_fig(category)
+
+    # ── callback 6: llm-cat → citation by provider chart ─────────────
+    @app.callback(
+        Output("llm-citation-chart", "figure"),
+        Input("llm-cat", "value"),
+    )
+    def update_llm_citation(category):
+        if not category:
+            return _empty_fig()
+        return _citation_by_provider_fig(category)
 
     return app

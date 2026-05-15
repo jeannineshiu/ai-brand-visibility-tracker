@@ -305,3 +305,88 @@ def citation_type_breakdown() -> pd.DataFrame:
     ORDER BY count DESC
     """
     return query_df(sql)
+
+
+def llm_disagreement(category: str) -> pd.DataFrame:
+    """
+    Per-brand visibility % broken down by LLM provider for a category.
+    Returns wide DataFrame: brand | openai | anthropic | gemini (visibility %)
+    Sorted by average visibility descending.
+    """
+    bm = _tbl("brand_mentions")
+    pr = _tbl("prompts")
+    lr = _tbl("llm_responses")
+
+    sql = f"""
+    SELECT bm.brand, bm.provider, COUNT(*) AS mentions
+    FROM {bm} bm
+    JOIN {pr} p ON bm.prompt_id = p.prompt_id
+    WHERE p.category = '{_safe(category)}'
+    GROUP BY bm.brand, bm.provider
+    """
+    df = query_df(sql)
+    if df.empty:
+        return pd.DataFrame(columns=["brand", "openai", "anthropic", "gemini"])
+
+    if _USE_BIGQUERY:
+        denom_sql = f"""
+        SELECT lr.provider, COUNT(DISTINCT CONCAT(lr.run_id, lr.prompt_id)) AS total
+        FROM {lr} lr
+        JOIN {pr} p ON lr.prompt_id = p.prompt_id
+        WHERE p.category = '{_safe(category)}'
+        GROUP BY lr.provider
+        """
+    else:
+        denom_sql = f"""
+        SELECT lr.provider, COUNT(DISTINCT lr.run_id || lr.prompt_id) AS total
+        FROM {lr} lr
+        JOIN {pr} p ON lr.prompt_id = p.prompt_id
+        WHERE p.category = '{_safe(category)}'
+        GROUP BY lr.provider
+        """
+    denom_df = query_df(denom_sql)
+    denom = dict(zip(denom_df["provider"], denom_df["total"])) if not denom_df.empty else {}
+
+    df["total"] = df["provider"].map(denom).fillna(1)
+    df["visibility_pct"] = (df["mentions"] / df["total"] * 100).round(1)
+
+    pivot = df.pivot_table(
+        index="brand", columns="provider", values="visibility_pct", fill_value=0
+    ).reset_index()
+    pivot.columns.name = None
+    for prov in ["openai", "anthropic", "gemini"]:
+        if prov not in pivot.columns:
+            pivot[prov] = 0.0
+
+    pivot["_avg"] = pivot[["openai", "anthropic", "gemini"]].mean(axis=1)
+    return pivot.sort_values("_avg", ascending=False).drop(columns="_avg").reset_index(drop=True)
+
+
+def citation_by_provider(category: str | None = None) -> pd.DataFrame:
+    """
+    Citation counts grouped by (provider, domain_type).
+    Optionally filtered to a single category via JOIN with prompts table.
+    Returns: provider, domain_type, count
+    """
+    cs = _tbl("citation_sources")
+    pr = _tbl("prompts")
+
+    if category:
+        sql = f"""
+        SELECT cs.provider, cs.domain_type, COUNT(*) AS count
+        FROM {cs} cs
+        JOIN {pr} p ON cs.prompt_id = p.prompt_id
+        WHERE cs.domain_type IS NOT NULL AND cs.provider IS NOT NULL
+          AND p.category = '{_safe(category)}'
+        GROUP BY cs.provider, cs.domain_type
+        ORDER BY cs.provider, count DESC
+        """
+    else:
+        sql = f"""
+        SELECT provider, domain_type, COUNT(*) AS count
+        FROM {cs}
+        WHERE domain_type IS NOT NULL AND provider IS NOT NULL
+        GROUP BY provider, domain_type
+        ORDER BY provider, count DESC
+        """
+    return query_df(sql)
