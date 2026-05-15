@@ -128,6 +128,26 @@ Persists results to BigQuery (production) or SQLite (local dev) with a unified s
 
 ![LLM Behavior Analysis — citation source mix by LLM provider](docs/llm_behavior_02.png)
 
+### Research Note — Query Fanout Analysis
+
+> See [`notebooks/fanout_analysis.ipynb`](notebooks/fanout_analysis.ipynb)
+
+When ChatGPT (with web search) receives a user prompt, it internally generates *fanout queries* before composing its answer. This notebook uses OpenAI's Responses API (`web_search_preview` tool, `gpt-4o`) to directly observe those queries across 8 prompts in 4 categories (CRM, Project Management, AI Writing, Developer Tools).
+
+**Key findings (8 prompts, 8 fanout queries collected):**
+
+| Finding | Detail |
+|---|---|
+| Queries per prompt | 1 (gpt-4o issues a single reformulated query, not multiple) |
+| Dominant vocabulary | 100% comparison words — `best`, `top` injected on every query |
+| Year injection | gpt-4o appended `2023` (its training cutoff), not the current year |
+| Brand injection | 0% — all queries kept generic, no specific brand names added |
+| Evaluation keywords | Not observed (`review`, `rating`, `recommend` absent from fanout) |
+
+**GEO implication:** Comparison keywords (`best`, `top`) dominate fanout vocabulary, yet OpenAI's actual citation mix is 85% `brand_owned` and only 4% `review_site` — suggesting the fanout vocabulary alone does not determine citation outcomes. Review-site presence remains important for brand retrieval, but official brand pages are the dominant citation source in practice.
+
+*Note: limited to OpenAI — Claude has no web search API and Gemini does not expose explicit search queries.*
+
 ### Module 4 — Recommendation Engine
 Trains a LightGBM model on citation co-occurrence features to predict which content channel (review site, tech media, community, etc.) will most improve visibility vs competitors. Served via FastAPI with hot-reload retraining — `POST /retrain` reloads the model in memory without server restart. Prompts can be added, listed, or deleted via the API without editing any Python files.
 
@@ -202,6 +222,8 @@ ai-brand-visibility-tracker/
 ├── data/
 │   ├── prompts_batch.py           # 40 built-in prompts (seeded to DB on first run)
 │   └── raw/                       # raw LLM response JSONs (gitignored)
+├── notebooks/
+│   └── fanout_analysis.ipynb      # research note: OpenAI fanout query vocabulary analysis
 ├── docs/                          # dashboard screenshots
 ├── demo_module1.py                # run LLM queries
 ├── demo_module2.py                # analyze latest run

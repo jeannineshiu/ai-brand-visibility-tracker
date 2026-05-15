@@ -8,6 +8,7 @@ data/*.pkl
 *.json
 !*example*.json
 .DS_Store
+.ipynb_checkpoints/
 .gcp/
 *service-account*.json
 *credentials*.json
