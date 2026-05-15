@@ -146,7 +146,7 @@ When ChatGPT (with web search) receives a user prompt, it internally generates *
 
 **GEO implication:** Comparison keywords (`best`, `top`) dominate fanout vocabulary, yet OpenAI's actual citation mix is 85% `brand_owned` and only 4% `review_site` — suggesting the fanout vocabulary alone does not determine citation outcomes. Review-site presence remains important for brand retrieval, but official brand pages are the dominant citation source in practice.
 
-*Note: limited to OpenAI — Claude has no web search API and Gemini does not expose explicit search queries.*
+*Note: limited to OpenAI — Claude has no web search API and Gemini does not expose explicit search queries. The `web_search_preview` tool in the Responses API may generate fewer fanout queries per prompt than ChatGPT's internal browsing interface; this notebook reflects API-level behavior.*
 
 ### Module 4 — Recommendation Engine
 Trains a LightGBM model on citation co-occurrence features to predict which content channel (review site, tech media, community, etc.) will most improve visibility vs competitors. Served via FastAPI with hot-reload retraining — `POST /retrain` reloads the model in memory without server restart. Prompts can be added, listed, or deleted via the API without editing any Python files.
